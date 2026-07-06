@@ -1,0 +1,30 @@
+{
+  "name": "bot-gir-master",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "check": "node checkKeywords.js",
+    "check:top2": "node checkTop2.js",
+    "check:top2:show": "HEADLESS=false node checkTop2.js",
+    "check:top2:keep": "HEADLESS=false KEEP_BROWSER_OPEN=true node checkTop2.js",
+    "check:top2:manual": "HEADLESS=false KEEP_BROWSER_OPEN=true WAIT_FOR_MANUAL_GOOGLE=true node checkTop2.js",
+    "check:top2:loop": "HEADLESS=false KEEP_BROWSER_OPEN=true WAIT_FOR_MANUAL_GOOGLE=true node checkTop2Loop.js",
+    "worker": "node workers/worker.js",
+    "server": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.16.0",
+    "bullmq": "^5.76.4",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "https-proxy-agent": "^9.0.0",
+    "ioredis": "^5.10.1",
+    "puppeteer": "^24.42.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

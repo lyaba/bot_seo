@@ -1,0 +1,7 @@
+node_modules/
+screenshots/
+*.png
+results*.txt
+.top2-loop-state.json
+.env
+npm-debug.log*
