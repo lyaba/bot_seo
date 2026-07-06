@@ -11,6 +11,10 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function randomInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
 function normalizeDomain(value) {
   return value
     .replace(/^https?:\/\//i, '')
@@ -219,21 +223,32 @@ async function searchFromGoogleHome(page, keyword, google) {
   });
 
   await acceptGoogleConsent(page);
+  await sleep(randomInt(2500, 5000));
 
   const inputSelector = 'textarea[name="q"], input[name="q"]';
   await page.waitForSelector(inputSelector, { timeout: 30000 });
-  await sleep(1000);
+  await sleep(randomInt(1200, 2800));
 
-  await page.click(inputSelector, { delay: 80 });
-  await page.keyboard.type(keyword, { delay: 80 });
-  await sleep(600);
+  await page.click(inputSelector, { delay: randomInt(120, 260) });
+  await sleep(randomInt(800, 1800));
+
+  for (const char of keyword) {
+    await page.keyboard.type(char);
+    await sleep(randomInt(120, 420));
+
+    if (Math.random() < 0.12) {
+      await sleep(randomInt(500, 1300));
+    }
+  }
+
+  await sleep(randomInt(2500, 5500));
 
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
     page.keyboard.press('Enter')
   ]);
 
-  await sleep(2000);
+  await sleep(randomInt(3000, 6000));
 }
 
 async function clickMatchingResult(page, target) {
