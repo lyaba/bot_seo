@@ -76,7 +76,7 @@ function writeResult(record) {
     resultFile,
     `${new Date().toISOString()} | ${record.keyword} | top2=${record.top2} | ` +
       `provider=${record.provider || 'browser'} | proxy=${record.proxy || '-'} | ` +
-      `search_ip=${record.searchIp || '-'} | ` +
+      `search_ip=${record.searchIp || '-'} | device=${record.device || '-'} | ` +
       `position=${record.position ?? 'not_found'} | url=${record.url || '-'} | ` +
       `site_ok=${record.siteOk ?? '-'} | status=${record.status || '-'} | ` +
       `error=${record.error || '-'}\n`
@@ -112,6 +112,7 @@ async function runOnce() {
     console.log(`Top 2: ${top2 ? 'YES' : 'NO'}`);
     console.log(`Position: ${rank.position ?? 'not_found'}`);
     console.log(`URL: ${rank.url || '-'}`);
+    console.log(`Device: ${rank.device || '-'}`);
     console.log(`Site works: ${site.ok} (${site.status || 'no status'})`);
 
     writeResult({
@@ -120,6 +121,7 @@ async function runOnce() {
       provider: 'browser',
       proxy: proxyLabel,
       searchIp,
+      device: rank.device,
       position: rank.position,
       url: rank.url,
       siteOk: site.ok,
@@ -137,6 +139,7 @@ async function runOnce() {
       provider: 'browser',
       proxy: proxyLabel,
       searchIp,
+      device: '-',
       position: null,
       url: null,
       error: message

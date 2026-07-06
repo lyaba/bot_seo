@@ -24,6 +24,48 @@ function proxyArgs(proxyUrl) {
   return [`--proxy-server=${proxyUrl}`];
 }
 
+const DEVICE_PROFILES = [
+  {
+    name: 'Windows 11 Chrome Desktop',
+    viewport: { width: 1440, height: 900, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    platform: 'Win32'
+  },
+  {
+    name: 'macOS Safari Desktop',
+    viewport: { width: 1512, height: 982, deviceScaleFactor: 2, isMobile: false, hasTouch: false },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 ' +
+      '(KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+    platform: 'MacIntel'
+  },
+  {
+    name: 'Linux Chrome Desktop',
+    viewport: { width: 1366, height: 768, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    platform: 'Linux x86_64'
+  },
+  {
+    name: 'iPhone Safari',
+    viewport: { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 ' +
+      '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone'
+  },
+  {
+    name: 'Android Chrome',
+    viewport: { width: 412, height: 915, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true },
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    platform: 'Linux armv8l'
+  }
+];
+
+function pickDeviceProfile() {
+  return DEVICE_PROFILES[Math.floor(Math.random() * DEVICE_PROFILES.length)];
+}
+
 async function acceptGoogleConsent(page) {
   const labels = [
     'принять все',
@@ -310,11 +352,17 @@ async function checkPosition(keyword, domain, proxy, options = {}) {
 
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1366, height: 768 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    const device = pickDeviceProfile();
+
+    console.log(`Device: ${device.name}`);
+
+    await page.setViewport(device.viewport);
+    await page.setUserAgent(device.userAgent);
+    await page.evaluateOnNewDocument((platform) => {
+      Object.defineProperty(navigator, 'platform', {
+        get: () => platform
+      });
+    }, device.platform);
     await page.setExtraHTTPHeaders({
       'Accept-Language': `${google.language}-${google.country.toUpperCase()},${google.language};q=0.9,en;q=0.8`
     });
@@ -359,7 +407,8 @@ async function checkPosition(keyword, domain, proxy, options = {}) {
             url: clicked?.url || result.url,
             title: clicked?.title || result.title,
             finalUrl: clicked?.finalUrl || null,
-            clicked: Boolean(clicked)
+            clicked: Boolean(clicked),
+            device: device.name
           };
         }
       }
@@ -378,7 +427,8 @@ async function checkPosition(keyword, domain, proxy, options = {}) {
       position: null,
       page: null,
       url: null,
-      title: null
+      title: null,
+      device: device.name
     };
   } finally {
     if (google.keepBrowserOpen) {
