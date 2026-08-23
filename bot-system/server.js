@@ -4,6 +4,8 @@ const queue = require('./queue');
 const app = express();
 app.use(express.json());
 
+const PORT = Number(process.env.PORT || 3000);
+
 app.post('/visit', async (req, res) => {
   const { url, proxy } = req.body;
 
@@ -23,6 +25,21 @@ app.post('/rank', async (req, res) => {
 });
 
 
-app.listen(3000, () => {
-  console.log('API started on 3000');
+app.get('/health', (req, res) => {
+  let redis = 'unknown';
+  try {
+    redis = queue.client ? queue.client.status : 'unknown';
+  } catch (e) {
+    redis = 'error';
+  }
+
+  res.json({
+    ok: true,
+    redis,
+    uptime: process.uptime()
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`API started on ${PORT}`);
 });

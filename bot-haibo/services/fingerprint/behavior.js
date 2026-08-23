@@ -21,7 +21,9 @@ async function simulateBehavior(page) {
         window.scrollBy(0, distance);
         totalHeight += distance;
 
-        if (totalHeight >= document.body.scrollHeight) {
+        const scrollHeight = (document.body && document.body.scrollHeight) || document.documentElement.scrollHeight;
+
+        if (totalHeight >= scrollHeight) {
           clearInterval(timer);
           resolve();
         }
@@ -41,7 +43,9 @@ async function simulateBehavior(page) {
     try {
       await randomLink.click();
       await sleep(random(3000, 6000));
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[fingerprint/behavior] link click failed');
+    }
   }
 }
 

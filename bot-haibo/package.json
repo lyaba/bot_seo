@@ -14,6 +14,7 @@
     "bullmq": "^5.76.4",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "http-proxy": "^1.18.1",
     "https-proxy-agent": "^9.0.0",
     "ioredis": "^5.10.1",
     "puppeteer": "^24.42.0",

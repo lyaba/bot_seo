@@ -1,8 +1,10 @@
+require('dotenv').config({ quiet: true });
+
 module.exports = [
   {
-    host: "185.241.150.36",
-    port: "59100",
-    username: "lyabachelyaba",
-    password: "wnlI24Jiaf"
+    host: process.env.PROXY_HOST || '',
+    port: process.env.PROXY_PORT || '',
+    username: process.env.PROXY_USERNAME || '',
+    password: process.env.PROXY_PASSWORD || ''
   }
 ];

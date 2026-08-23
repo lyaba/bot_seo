@@ -3,3 +3,11 @@
 **/cron.log
 **/results.txt
 **/screenshots
+**/.profiles
+**/.DS_Store
+.dart_tool/
+**/config/captcha.json
+**/.profiles
+*.png
+*.jpeg
+yandex_page_dump.html

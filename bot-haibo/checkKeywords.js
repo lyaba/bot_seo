@@ -1,6 +1,7 @@
 const { checkPosition } = require('./services/rankChecker');
 const fs = require('fs');
 const { takeScreenshot } = require('./services/siteScreenshot');
+const proxies = require('./proxies');
 
 function shouldVisit(pos) {
   if (!pos) return false;
@@ -51,21 +52,20 @@ async function run() {
 
       console.log("Заходим на сайт");
 
-      const proxy = {
-        host: 'res.geonix.com',
-        port: '10000',
-        username: '5df416f249c6d735',
-        password: 'WQCaA7JhOEu69oSs'
-      };
+      const proxy = proxies[0];
 
-      //  ПЕРЕДАЁМ KEYWORD
-      const screenshot = await takeScreenshot(
-        domain,
-        proxy,
-        keyword
-      );
+      if (!proxy || !proxy.host || !proxy.port) {
+        console.log("Прокси не настроен (HAIBO_PROXY_HOST/HAIBO_PROXY_PORT), пропуск визита");
+      } else {
+        //  ПЕРЕДАЁМ KEYWORD
+        const screenshot = await takeScreenshot(
+          domain,
+          proxy,
+          keyword
+        );
 
-      console.log("Скрин:", screenshot);
+        console.log("Скрин:", screenshot);
+      }
 
     } else {
 
