@@ -222,6 +222,29 @@ The following patterns are repeated across all three projects:
 - Full list of environment variables required — unconfirmed
 - Database connections and storage mechanisms — partially confirmed only
 
+## 8.1 Confirmed Runtime Diagnostics Finding
+
+- `bot-haibo/yandex_search_visit.js` runs `bot-haibo/solve_captcha.py` via `/usr/bin/python3`.
+- Confirmed issue fixed: when `solve_captcha.py --output json` exited with code 1, the Node wrapper reported only the first part of `stderr`. On macOS this could show the urllib3 `NotOpenSSLWarning` instead of the solver's real JSON error from `stdout`.
+- Fix scope: wrapper diagnostics only. Solver behavior, retry count, CAPTCHA handling, proxy behavior, and Yandex request flow were not changed.
+- Added output redaction for proxy credentials/usernames/passwords before Python subprocess details are logged.
+- Confirmed issue fixed: `bot-haibo/solve_captcha.py` now suppresses only the known urllib3 LibreSSL/OpenSSL compatibility warning before importing `requests`; other warnings/errors are not globally hidden.
+- Confirmed issue fixed: direct Yandex fallback URLs, warm-up navigation, proxy IP check, and direct target navigation now use the same transient network retry helper for mobile-proxy tunnel drops such as `ERR_TUNNEL_CONNECTION_FAILED`.
+- Confirmed issue fixed: fallback search failures now report a classified reason (`proxy`, `solver`, `captcha`, `no-results`, or `navigation`) instead of always logging `All search attempts failed due to CAPTCHA`.
+- Confirmed non-goal: SmartCaptcha/image challenge bypass was not made more aggressive; failed checkbox clicks are classified as CAPTCHA still active rather than treated as a solver/code defect.
+- Confirmed issue fixed: Python solver subprocess diagnostics now run Python in unbuffered mode, stream stdout/stderr lines into the Node log, redact proxy secrets and JSON `token` values, and report signal/timeout explicitly when Node kills the child process (`code === null`).
+- Confirmed issue fixed: `solve_captcha.py` now has its own wall-clock deadline across CapMonster create/poll HTTP requests and waits between attempts, so solver timeout should return a JSON error instead of relying on the Node wrapper to kill the process.
+- Confirmed issue fixed: `solve_captcha.py` now validates non-string proxy values as a clear `ValueError`, emits `error_type` in JSON failures, flushes logs, and redacts CLI proxy secrets in direct Python output.
+- Confirmed API check: CapMonster Cloud `getBalance` returned HTTP 200 with `errorId: 0` and balance available. This confirms API connectivity/authentication only; it does not confirm successful solving or Yandex acceptance of SmartCaptcha/image challenge tokens.
+- Confirmed issue fixed: `solve_captcha.py` now treats CapMonster `createTask` responses as success only when `errorId == 0` and `taskId` is non-zero. Error responses such as `errorId: 1, taskId: 0` now produce a clear `RuntimeError` with `errorCode/errorDescription` instead of being polled as a fake task.
+- Confirmed issue fixed: `solve_captcha.py` now supports `--self-test`, which validates Python/import/config startup without creating a CapMonster task. `yandex_search_visit.js` runs this preflight before solver attempts and reports a separate startup failure if Python cannot produce the self-test JSON.
+- Confirmed self-test output locally: Python 3.9.6, requests 2.32.5, mode `cloud`, API key present, timeout 120, poll interval 3, no config-level solver proxy.
+- Confirmed issue fixed: solver preflight now receives the same CLI `--proxy` as real solver attempts and reports the effective runtime proxy state. Local self-test with a dummy proxy shows `has_proxy_for_solving: true`.
+- Confirmed issue fixed: `yandex_search_visit.js` now stops solver retries on CapMonster transport/proxy errors such as `ProxyError`, `Tunnel connection failed`, or `503 Node has rejected the request` to avoid creating additional CapMonster tasks after the API channel fails.
+- Confirmed issue fixed: CapMonster Cloud API calls (`createTask`/`getTaskResult`) now bypass the mobile proxy by default (`route_api_via_proxy: false`). The mobile proxy is still included in the CapMonster task payload for solving, but Mac-to-`api.capmonster.cloud` transport is direct to avoid geonix `503`/`SSLEOF` tunnel failures.
+- Confirmed issue fixed: if a transient transport error happens after a CapMonster `taskId` is created, `solve_captcha.py` keeps polling the same task within the wall-clock deadline instead of exiting and causing Node to create a new paid task.
+- Confirmed issue fixed: if CapMonster is still `processing` when the solver wall-clock timeout expires, `yandex_search_visit.js` treats it as a terminal `solver-timeout` and stops further solver retries/alternate URLs to avoid creating additional paid tasks.
+
 ---
 
 ## 9. Security Requirements Met
@@ -230,7 +253,7 @@ The following patterns are repeated across all three projects:
 - All secret values replaced with [REDACTED] in this document
 - `.env` files were never opened or displayed
 - Hardcoded credentials found and flagged for rotation (no values exposed)
-- No application source files modified
+- Application source modifications in current work: `bot-haibo/yandex_search_visit.js` diagnostics/subprocess timeout/navigation error classification and `bot-haibo/solve_captcha.py` warning suppression/internal timeout diagnostics only
 - No bots executed
 - No dependencies installed
 - No commits or pushes made

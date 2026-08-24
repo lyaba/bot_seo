@@ -94,6 +94,114 @@ async function humanType(page, text) {
 
 // ─── Captcha Solver Integration ──────────────────────────
 
+function redactSensitive(value, secrets = []) {
+  let text = String(value || '');
+  for (const secret of secrets) {
+    if (secret) {
+      text = text.split(secret).join('[REDACTED]');
+    }
+  }
+
+  return text
+    .replace(/(https?:\/\/)([^:@\s]+):([^@\s]+)@/g, '$1[REDACTED]@')
+    .replace(/(proxy(?:Login|Password|_login|_password)?["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[REDACTED]')
+    .replace(/(["']token["']\s*:\s*["'])[^"']+(["'])/gi, '$1[REDACTED]$2');
+}
+
+function extractPythonJson(stdout) {
+  const outputLines = stdout.trim().split('\n').map(line => line.trim()).filter(Boolean);
+  const jsonLine = outputLines.reverse().find(line => line.startsWith('{') && line.endsWith('}'));
+  if (!jsonLine) return null;
+
+  try {
+    return JSON.parse(jsonLine);
+  } catch {
+    return null;
+  }
+}
+
+function runPythonProcess(pythonPath, args, {
+  timeoutMs = 150000,
+  redactionSecrets = [],
+  logOutput = true,
+} = {}) {
+  return new Promise((resolve) => {
+    let timedOut = false;
+    let settled = false;
+    const proc = spawn(pythonPath, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        PYTHONFAULTHANDLER: '1',
+      },
+    });
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      if (!proc.killed) proc.kill('SIGTERM');
+    }, timeoutMs);
+
+    let stdout = '';
+    let stderr = '';
+
+    const capture = (stream, data) => {
+      const text = data.toString();
+      if (stream === 'stdout') stdout += text;
+      else stderr += text;
+
+      if (!logOutput) return;
+      const lines = text.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        console.log(`  [python:${stream}] ${redactSensitive(line, redactionSecrets)}`);
+      }
+    };
+
+    proc.stdout.on('data', (data) => capture('stdout', data));
+    proc.stderr.on('data', (data) => capture('stderr', data));
+
+    proc.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      resolve({ code, signal, timedOut, stdout, stderr });
+    });
+
+    proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      resolve({ code: null, signal: null, timedOut, stdout, stderr, spawnError: err });
+    });
+  });
+}
+
+function formatPythonFailure(result, redactionSecrets = []) {
+  if (result.spawnError) {
+    if (result.spawnError.code === 'ENOENT') return 'Python3 not found. Install Python 3.x';
+    return `Failed to start Python: ${result.spawnError.message}`;
+  }
+
+  const parsed = extractPythonJson(result.stdout);
+  if (parsed && parsed.status !== 'success') {
+    return redactSensitive(parsed.error || JSON.stringify(parsed), redactionSecrets);
+  }
+
+  const details = [
+    result.signal && `signal: ${result.signal}`,
+    result.timedOut && `timeout: true`,
+    result.stderr.trim() && `stderr: ${result.stderr.trim()}`,
+    result.stdout.trim() && `stdout: ${result.stdout.trim()}`,
+  ].filter(Boolean).join(' | ');
+  const safeDetails = redactSensitive(details || 'no output', redactionSecrets);
+  const exitLabel = result.signal
+    ? `Python script was killed by signal ${result.signal}`
+    : `Python script exited with code ${result.code}`;
+  return `${exitLabel}: ${safeDetails.substring(0, 1500)}`;
+}
+
+const SOLVER_TRANSPORT_ERRORS = /ProxyError|Unable to connect to proxy|Tunnel connection failed|Node has rejected the request|ConnectTimeout|Read timed out|ConnectionError|Max retries exceeded/i;
+const SOLVER_TERMINAL_RETRY_ERRORS = /Captcha solver wall-clock timeout reached|Captcha solving timed out/i;
+
 async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   console.log('  🧩 Solving captcha via Python/CapMonster...');
   
@@ -111,9 +219,12 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   
   // Build proxy args for Python script using proxyAuth directly
   let proxyArg = null;
+  const redactionSecrets = [];
   if (proxyAuth && proxyAuth.host && proxyAuth.port && proxyAuth.username && proxyAuth.password) {
     proxyArg = `${proxyAuth.host}:${proxyAuth.port}:${proxyAuth.username}:${proxyAuth.password}`;
+    redactionSecrets.push(proxyArg, proxyAuth.username, proxyAuth.password);
   } else if (proxyAuth && proxyAuth.username) {
+    redactionSecrets.push(proxyAuth.username, proxyAuth.password);
     // Fallback: extract host/port from the captcha page URL
     const urlMatch = captchaUrl.match(/https?:\/\/([^/]+)/);
     if (urlMatch) {
@@ -124,13 +235,34 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   
   const pythonPath = '/usr/bin/python3';
   const scriptPath = path.join(__dirname, 'solve_captcha.py');
+  const solverTimeoutMs = 150000;
+
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error(`Captcha solver script not found: ${scriptPath}`);
+  }
+
+  const preflightArgs = ['-u', '-X', 'faulthandler', scriptPath, '--self-test', '--output', 'json'];
+  if (proxyArg) {
+    preflightArgs.push('--proxy', proxyArg);
+  }
+  const safePreflightArgs = preflightArgs.map((arg, index) => preflightArgs[index - 1] === '--proxy' ? '[REDACTED]' : arg);
+  console.log(`  Preflight: ${pythonPath} ${safePreflightArgs.join(' ')}`);
+  const preflight = await runPythonProcess(pythonPath, preflightArgs, {
+    timeoutMs: 15000,
+    redactionSecrets,
+  });
+  const preflightJson = extractPythonJson(preflight.stdout);
+  if (preflight.code !== 0 || !preflightJson || preflightJson.status !== 'ok') {
+    throw new Error(`Python solver preflight failed: ${formatPythonFailure(preflight, redactionSecrets)}`);
+  }
+  console.log(`  ✓ Python solver preflight ok: python ${preflightJson.python}, requests ${preflightJson.requests}, proxy_for_solving=${preflightJson.config && preflightJson.config.has_proxy_for_solving ? 'yes' : 'no'}`);
   
   let lastError = null;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(`  Attempt ${attempt}/${maxRetries}...`);
     
-    const args = [scriptPath, '--url', captchaUrl, '--sitekey', sitekey, '--output', 'json'];
+    const args = ['-u', '-X', 'faulthandler', scriptPath, '--url', captchaUrl, '--sitekey', sitekey, '--output', 'json'];
     if (proxyArg) {
       args.push('--proxy', proxyArg);
     }
@@ -138,68 +270,35 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
     const safeArgs = args.map((arg, index) => args[index - 1] === '--proxy' ? '[REDACTED]' : arg);
     console.log(`  Running: ${pythonPath} ${safeArgs.join(' ')}`);
     
-    lastError = await new Promise((resolve) => {
-      const proc = spawn(pythonPath, args, {
-        timeout: 150000,
-        stdio: ['pipe', 'pipe', 'pipe'],
+    lastError = await (async () => {
+      const result = await runPythonProcess(pythonPath, args, {
+        timeoutMs: solverTimeoutMs,
+        redactionSecrets,
       });
-      
-      let stdout = '';
-      let stderr = '';
-      
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-      
-      proc.stderr.on('data', (data) => {
-        stderr += data.toString();
-        const lines = data.toString().split('\n').filter(l => l.trim());
-        for (const line of lines) {
-          console.log(`  [python] ${line}`);
+
+      const parsed = extractPythonJson(result.stdout);
+      if (parsed && parsed.status === 'success' && parsed.token) {
+        console.log(`  ✓ Captcha solved on attempt ${attempt}! Token length: ${parsed.token.length}`);
+        return { token: parsed.token, error: null };
+      }
+
+      if (parsed) {
+        const errorMsg = redactSensitive(parsed.error || JSON.stringify(parsed), redactionSecrets);
+        console.log(`  ✗ Python solver error (attempt ${attempt}): ${errorMsg}`);
+        return { token: null, error: errorMsg };
+      }
+
+      if (result.code === 0 && result.stdout.trim()) {
+        const outputLines = result.stdout.trim().split('\n').map(line => line.trim()).filter(Boolean);
+        const token = outputLines[outputLines.length - 1] || '';
+        if (/^[A-Za-z0-9_.-]{50,}$/.test(token)) {
+          console.log(`  ✓ Captcha solved on attempt ${attempt}! Token length: ${token.length}`);
+          return { token, error: null };
         }
-      });
-      
-      proc.on('close', (code) => {
-        if (code === 0 && stdout.trim()) {
-          try {
-            const outputLines = stdout.trim().split('\n').map(line => line.trim()).filter(Boolean);
-            const jsonLine = outputLines.reverse().find(line => line.startsWith('{') && line.endsWith('}'));
-            const result = JSON.parse(jsonLine || stdout.trim());
-            if (result.status === 'success' && result.token) {
-              console.log(`  ✓ Captcha solved on attempt ${attempt}! Token length: ${result.token.length}`);
-              resolve({ token: result.token, error: null });
-              return;
-            } else {
-              const errorMsg = result.error || 'Captcha solving failed';
-              console.log(`  ✗ Python solver error (attempt ${attempt}): ${errorMsg}`);
-              resolve({ token: null, error: errorMsg });
-              return;
-            }
-          } catch (e) {
-            const outputLines = stdout.trim().split('\n').map(line => line.trim()).filter(Boolean);
-            const token = outputLines[outputLines.length - 1] || '';
-            if (/^[A-Za-z0-9_.-]{50,}$/.test(token)) {
-              console.log(`  ✓ Captcha solved on attempt ${attempt}! Token length: ${token.length}`);
-              resolve({ token, error: null });
-              return;
-            } else {
-              resolve({ token: null, error: `Python script returned non-JSON: ${stdout.substring(0, 200)}` });
-              return;
-            }
-          }
-        } else {
-          resolve({ token: null, error: `Python script exited with code ${code}: ${stderr.substring(0, 200)}` });
-        }
-      });
-      
-      proc.on('error', (err) => {
-        if (err.code === 'ENOENT') {
-          resolve({ token: null, error: 'Python3 not found. Install Python 3.x' });
-        } else {
-          resolve({ token: null, error: `Failed to start Python: ${err.message}` });
-        }
-      });
-    });
+      }
+
+      return { token: null, error: formatPythonFailure(result, redactionSecrets) };
+    })();
     
     if (lastError.token) {
       return lastError.token;
@@ -207,6 +306,14 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
     
     lastError = lastError.error;
     console.log(`  ✗ Attempt ${attempt} failed: ${lastError}`);
+
+    if (SOLVER_TRANSPORT_ERRORS.test(lastError)) {
+      throw new Error(`Captcha solver transport/proxy error; stopping retries to avoid creating more CapMonster tasks. Last error: ${lastError}`);
+    }
+
+    if (SOLVER_TERMINAL_RETRY_ERRORS.test(lastError)) {
+      throw new Error(`Captcha solver timed out while CapMonster was still processing; stopping retries to avoid creating more paid tasks. Last error: ${lastError}`);
+    }
     
     if (attempt < maxRetries) {
       const waitMs = rand(3000, 6000) * attempt;
@@ -438,6 +545,7 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
     `https://yandex.ru/search/?text=${encodeURIComponent(query)}&auto-direct=true`,
     `https://search.yandex.ru/yandsearch?text=${encodeURIComponent(query)}&lr=213`,
   ];
+  let lastFailure = null;
 
   for (let i = 0; i < urls.length; i++) {
     const searchUrl = urls[i];
@@ -460,7 +568,7 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
     });
 
     try {
-      const response = await page.goto(searchUrl, {
+      await gotoWithRetry(page, searchUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30000
       });
@@ -475,7 +583,19 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
         await sleep(rand(3000, 5000));
         
         // Try to solve the captcha
-        const token = await solveCaptchaWithPython(page, proxyAuth);
+        let token = null;
+        try {
+          token = await solveCaptchaWithPython(page, proxyAuth);
+        } catch (e) {
+          const reason = SOLVER_TERMINAL_RETRY_ERRORS.test(e.message || String(e)) ? 'solver-timeout' : 'solver';
+          lastFailure = { reason, error: e.message };
+          console.log(`  ✗ Python captcha solver failed: ${e.message}`);
+          await page.close();
+          if (reason === 'solver-timeout') {
+            return { success: false, ...lastFailure };
+          }
+          continue;
+        }
         
         if (token) {
           console.log('  🔑 Applying token...');
@@ -513,6 +633,7 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
             console.log('  ⚠️ Captcha solved but no results yet — keeping page for fallback handling');
             return { page, success: true };
           } else {
+            lastFailure = { reason: 'captcha', error: 'Captcha token was not accepted' };
             console.log('  ✗ Captcha token not accepted, trying next URL...');
             await page.close();
             continue;
@@ -520,6 +641,7 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
         }
         
         // If Python solver failed, try next URL
+        lastFailure = { reason: 'solver', error: 'Python captcha solver returned no token' };
         console.log('  ✗ Python captcha solver failed, trying next URL...');
         await page.close();
         continue;
@@ -549,15 +671,19 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
       // Check if we got redirected somewhere else
       const bodyText = await page.evaluate(() => document.body.innerText.substring(0, 200));
       console.log('  Body preview:', bodyText.replace(/\n/g, ' ').substring(0, 100));
+      lastFailure = { reason: 'no-results', error: 'No recognizable Yandex result items on page' };
       await page.close();
 
     } catch (e) {
+      const reason = TRANSIENT_NET_ERRORS.test(e.message || String(e)) ? 'proxy' : 'navigation';
+      lastFailure = { reason, error: e.message };
       console.log(`  Error: ${e.message}`);
       try { await page.close(); } catch {}
+      if (reason === 'proxy') break;
     }
   }
 
-  return { success: false };
+  return { success: false, ...(lastFailure || { reason: 'unknown', error: 'No search URL succeeded' }) };
 }
 
 /**
@@ -632,6 +758,26 @@ async function scrollToBottom(page, device = 'desktop') {
 
 const TRANSIENT_NET_ERRORS = /ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_(RESET|CLOSED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_PROXY_CONNECTION_FAILED|TimeoutError/i;
 
+function formatSearchFailure(result) {
+  if (!result) return 'Search attempts failed: no result details.';
+  if (result.reason === 'proxy') {
+    return `Search attempts failed due to proxy/network tunnel error: ${result.error}`;
+  }
+  if (result.reason === 'solver') {
+    return `All search attempts reached CAPTCHA and the Python solver failed: ${result.error}`;
+  }
+  if (result.reason === 'solver-timeout') {
+    return `Captcha solver timed out while CapMonster was still processing: ${result.error}`;
+  }
+  if (result.reason === 'captcha') {
+    return `All search attempts failed due to CAPTCHA: ${result.error}`;
+  }
+  if (result.reason === 'no-results') {
+    return `Search attempts opened pages, but no results were detected: ${result.error}`;
+  }
+  return `Search attempts failed: ${result.error || 'unknown error'}`;
+}
+
 /**
  * Navigate with retries for transient mobile-proxy tunnel drops
  * (geonix returns CONNECT 503 while rotating exit IPs).
@@ -649,6 +795,7 @@ async function gotoWithRetry(page, url, options = {}, attempts = 3) {
       if (i < attempts) await sleep(rand(6000, 12000));
     }
   }
+  if (lastErr) lastErr.transientNetworkFailure = true;
   throw lastErr;
 }
 
@@ -820,7 +967,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
 
         const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
         if (!result.success) {
-          console.log('All search attempts failed due to CAPTCHA.');
+          console.log(formatSearchFailure(result));
           return false;
         }
         resultPage = result.page;
@@ -844,7 +991,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
 
           const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
           if (!result.success) {
-            console.log('All search attempts failed due to CAPTCHA.');
+            console.log(formatSearchFailure(result));
             return false;
           }
           resultPage = result.page;
@@ -863,7 +1010,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
         if (!hasResults) {
           console.log('No results on current page, trying direct search...');
           const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
-          await mainPage.goto(directUrl, {
+          await gotoWithRetry(mainPage, directUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 30000
           });
@@ -878,7 +1025,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
               console.log('Falling back to alternative URLs + solver...');
               const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
               if (!result.success) {
-                console.log('All search attempts failed due to CAPTCHA.');
+                console.log(formatSearchFailure(result));
                 return false;
               }
               resultPage = result.page;
@@ -938,7 +1085,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       let navOk = false;
       for (let att = 1; att <= 2 && !navOk; att++) {
         try {
-          await activePage.goto(`https://${targetDomain}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          await gotoWithRetry(activePage, `https://${targetDomain}/`, { waitUntil: 'domcontentloaded', timeout: 45000 }, 2);
           navOk = true;
         } catch (e) {
           console.log(`  Direct nav attempt ${att}/2 failed: ${e.message}`);
@@ -994,14 +1141,14 @@ async function warmUpProfile(browser, proxyAuth, device, profileDir) {
     await humanizePage(page, device);
     await authenticateIfNeeded(page, proxyAuth);
 
-    await page.goto('https://yandex.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoWithRetry(page, 'https://yandex.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await sleep(rand(3000, 6000));
     await humanActivity(page, device);
     await scrollToBottom(page, device);
     await sleep(rand(2000, 4000));
 
     // A second neutral page deepens the cookie set
-    await page.goto('https://ya.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await gotoWithRetry(page, 'https://ya.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await sleep(rand(2500, 5000));
     await humanActivity(page, device);
 
@@ -1060,10 +1207,10 @@ async function main() {
     let ipText = null;
     for (let attempt = 1; attempt <= 3 && !ipText; attempt++) {
       try {
-        await testPage.goto('https://api.ipify.org?format=json', {
+        await gotoWithRetry(testPage, 'https://api.ipify.org?format=json', {
           waitUntil: 'domcontentloaded',
           timeout: 20000
-        });
+        }, 1);
         ipText = await testPage.evaluate(() => document.documentElement.textContent);
       } catch (e) {
         console.log(`  Proxy attempt ${attempt}/3 failed: ${e.message}`);
@@ -1183,7 +1330,7 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
       foundUrl = urlMatch[0];
       console.log('  Found URL in page text:', foundUrl);
       // Try to click it by navigating directly
-      targetLink = { click: async () => { await page.goto(foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); } };
+      targetLink = { click: async () => { await gotoWithRetry(page, foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); } };
     }
   }
 
@@ -1248,7 +1395,7 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
       // Still not on target — navigate directly as last resort
       if (!domainsToMatch.some(d => page.url().includes(d))) {
         console.log('  No new tab with target, navigating directly:', foundUrl);
-        await page.goto(foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await gotoWithRetry(page, foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
     }
 
