@@ -560,6 +560,40 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
   return { success: false };
 }
 
+/**
+ * Swipe using REAL touch events (touchStart/touchMove/touchEnd).
+ */
+async function touchSwipe(page, fromX, fromY, toX, toY, steps = 6) {
+  try {
+    await page.touchscreen.touchStart({ x: fromX, y: fromY });
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      await page.touchscreen.touchMove({ x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t });
+      await sleep(rand(16, 48));
+    }
+    await page.touchscreen.touchEnd();
+  } catch {}
+}
+
+/**
+ * Ambient hand activity. Desktop: bezier-ish mouse moves.
+ * Mobile: NO mouse events (phones have none) — occasional light swipes.
+ */
+async function humanActivity(page, device = 'desktop') {
+  if (device === 'mobile') {
+    if (Math.random() < 0.5) {
+      const vp = page.viewport();
+      const w = (vp && vp.width) || 390;
+      const h = (vp && vp.height) || 844;
+      const x = rand(w * 0.25, w * 0.75);
+      await touchSwipe(page, x, rand(h * 0.45, h * 0.6), x + rand(-40, 40), rand(h * 0.5, h * 0.75), rand(5, 9));
+      await sleep(rand(300, 900));
+    }
+    return;
+  }
+  await humanActivity(page, device);
+}
+
 async function humanMouse(page) {
   for (let i = 0; i < rand(4, 7); i++) {
     await page.mouse.move(rand(50, 1200), rand(80, 700), { steps: rand(8, 20) });
@@ -567,7 +601,22 @@ async function humanMouse(page) {
   }
 }
 
-async function scrollToBottom(page) {
+async function scrollToBottom(page, device = 'desktop') {
+  if (device === 'mobile') {
+    // Inertial touch swipes: fast flick, decelerating tail
+    for (let i = 0; i < rand(3, 6); i++) {
+      const vp = page.viewport();
+      const w = (vp && vp.width) || 390;
+      const startX = rand(w * 0.3, w * 0.7);
+      await touchSwipe(page, startX, rand(550, 700), startX + rand(-30, 30), rand(380, 480), rand(4, 7));
+      await sleep(rand(300, 700));
+      const atBottom = await page.evaluate(
+        () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 60
+      ).catch(() => true);
+      if (atBottom) break;
+    }
+    return;
+  }
   await page.evaluate(async () => {
     await new Promise(resolve => {
       let last = 0;
@@ -581,6 +630,28 @@ async function scrollToBottom(page) {
   });
 }
 
+const TRANSIENT_NET_ERRORS = /ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_(RESET|CLOSED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_PROXY_CONNECTION_FAILED|TimeoutError/i;
+
+/**
+ * Navigate with retries for transient mobile-proxy tunnel drops
+ * (geonix returns CONNECT 503 while rotating exit IPs).
+ */
+async function gotoWithRetry(page, url, options = {}, attempts = 3) {
+  let lastErr = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await page.goto(url, options);
+    } catch (e) {
+      lastErr = e;
+      const msg = e && e.message ? e.message : String(e);
+      if (!TRANSIENT_NET_ERRORS.test(msg)) throw e;
+      console.log(`  Nav attempt ${i}/${attempts} failed (${msg.split('\n')[0].substring(0, 90)}), waiting out IP rotation...`);
+      if (i < attempts) await sleep(rand(6000, 12000));
+    }
+  }
+  throw lastErr;
+}
+
 function isCaptchaPage(pageUrl) {
   return pageUrl.includes('showcaptcha') || pageUrl.includes('verify') || pageUrl.includes('robot');
 }
@@ -590,7 +661,7 @@ function isCaptchaPage(pageUrl) {
  * Works when Yandex serves the checkbox stage (no image challenge).
  * Returns true if the page left the captcha URL within ~20s.
  */
-async function tryClickCaptchaCheckbox(page) {
+async function tryClickCaptchaCheckbox(page, device = 'desktop') {
   try {
     const btn = await page.$('#js-button.CheckboxCaptcha-Button');
     if (!btn) {
@@ -598,13 +669,19 @@ async function tryClickCaptchaCheckbox(page) {
       return false;
     }
 
-    // Human-like: move mouse to the button, pause, click
+    // Human-like: bring into view, then tap (mobile) or hover+click (desktop)
+    await btn.evaluate(elem => elem.scrollIntoView({ block: 'center' })).catch(() => {});
+    await sleep(rand(300, 700));
     const box = await btn.boundingBox();
-    if (box) {
+    if (device === 'mobile' && box) {
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    } else if (box) {
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: rand(8, 16) });
       await sleep(rand(300, 800));
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: rand(60, 140) });
+    } else {
+      await btn.evaluate(elem => elem.click()).catch(() => {});
     }
-    await btn.click({ delay: rand(60, 140) });
 
     // Poll for redirect away from the captcha page
     for (let i = 0; i < 20; i++) {
@@ -686,12 +763,12 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     await humanizePage(mainPage, device);
     await authenticateIfNeeded(mainPage, proxyAuth);
 
-    await mainPage.goto('https://ya.ru/', {
+    await gotoWithRetry(mainPage, 'https://ya.ru/', {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
     await sleep(rand(3000, 5000));
-    await humanMouse(mainPage);
+    await humanActivity(mainPage, device);
 
     // Try to find and use the search input on ya.ru
     console.log('--- Using ya.ru search ---');
@@ -724,10 +801,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       console.log('  Search input not found on ya.ru, navigating directly...');
       // Direct Yandex search URL — the most reliable method
       const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
-      await mainPage.goto(directUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
+      await gotoWithRetry(mainPage, directUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
 
     await sleep(rand(4000, 7000));
@@ -737,7 +811,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
 
     if (isCaptchaPage(currentPageUrl)) {
       console.log('CAPTCHA detected! Trying checkbox click first...');
-      if (await tryClickCaptchaCheckbox(mainPage)) {
+      if (await tryClickCaptchaCheckbox(mainPage, device)) {
         activePage = mainPage;
       } else {
         console.log('Falling back to direct search URLs + solver...');
@@ -755,13 +829,13 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     } else {
       console.log('Current URL:', currentPageUrl);
       await sleep(rand(3000, 5000));
-      await humanMouse(mainPage);
+      await humanActivity(mainPage, device);
 
       // Check if captcha appeared after navigation
       const newUrl = mainPage.url();
       if (isCaptchaPage(newUrl)) {
         console.log('CAPTCHA detected after search! Trying checkbox click first...');
-        if (await tryClickCaptchaCheckbox(mainPage)) {
+        if (await tryClickCaptchaCheckbox(mainPage, device)) {
           activePage = mainPage;
         } else {
           console.log('Falling back to direct URLs + solver...');
@@ -778,7 +852,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
         }
       } else {
         await sleep(rand(2000, 4000));
-        await scrollToBottom(mainPage);
+        await scrollToBottom(mainPage, device);
         await sleep(rand(1000, 2000));
 
         // If we didn't get results, try direct search as fallback
@@ -798,7 +872,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           const checkUrl = mainPage.url();
           if (isCaptchaPage(checkUrl)) {
             console.log('CAPTCHA detected! Trying checkbox click first...');
-            if (await tryClickCaptchaCheckbox(mainPage)) {
+            if (await tryClickCaptchaCheckbox(mainPage, device)) {
               activePage = mainPage;
             } else {
               console.log('Falling back to alternative URLs + solver...');
@@ -811,7 +885,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
               activePage = resultPage;
             }
           } else {
-            await scrollToBottom(mainPage);
+            await scrollToBottom(mainPage, device);
             await sleep(rand(1000, 2000));
           }
         }
@@ -831,28 +905,28 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           ? base.replace(/([?&])page=\d+/, `$1page=${pageNum}`)
           : `${base}${base.includes('?') ? '&' : '?'}page=${pageNum}`;
 
-        await activePage.goto(urlWithPage, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        await gotoWithRetry(activePage, urlWithPage, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
         await sleep(rand(2500, 5000));
 
         if (isCaptchaPage(activePage.url())) {
           console.log(`CAPTCHA on page ${pageNum}, trying checkbox click...`);
-          if (!(await tryClickCaptchaCheckbox(activePage))) break;
+          if (!(await tryClickCaptchaCheckbox(activePage, device))) break;
 
           // Captcha redirect may drop the &page=N param — restore it so we
           // don't accidentally rescan page 1
           if (pageNum > 1 && !/[?&]page=\d+/.test(activePage.url())) {
             const base = activePage.url();
             const sep = base.includes('?') ? '&' : '?';
-            await activePage.goto(`${base}${sep}page=${pageNum}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+            await gotoWithRetry(activePage, `${base}${sep}page=${pageNum}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
             await sleep(rand(2000, 4000));
           }
         }
 
-        await scrollToBottom(activePage);
+        await scrollToBottom(activePage, device);
         await sleep(rand(1000, 2000));
       }
 
-      visited = await findAndVisitTarget(activePage, targetDomain);
+      visited = await findAndVisitTarget(activePage, targetDomain, device);
     }
 
     if (!visited) {
@@ -882,7 +956,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       await activePage.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true });
       console.log(`Screenshot saved: ${targetDomain}_from_yandex.png`);
 
-      await visitSite(activePage, targetDomain);
+      await visitSite(activePage, targetDomain, device);
     }
     return true;
 
@@ -922,14 +996,14 @@ async function warmUpProfile(browser, proxyAuth, device, profileDir) {
 
     await page.goto('https://yandex.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await sleep(rand(3000, 6000));
-    await humanMouse(page);
-    await scrollToBottom(page);
+    await humanActivity(page, device);
+    await scrollToBottom(page, device);
     await sleep(rand(2000, 4000));
 
     // A second neutral page deepens the cookie set
     await page.goto('https://ya.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await sleep(rand(2500, 5000));
-    await humanMouse(page);
+    await humanActivity(page, device);
 
     fs.writeFileSync(marker, String(Date.now()));
     await page.close();
@@ -1041,7 +1115,7 @@ async function main() {
   }
 }
 
-async function findAndVisitTarget(page, targetDomain) {
+async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
   // IDN domains: browser serializes hrefs to punycode, visible text keeps
   // Unicode — match both forms.
   const domainsToMatch = buildDomains(targetDomain);
@@ -1053,7 +1127,7 @@ async function findAndVisitTarget(page, targetDomain) {
   } catch {}
 
   await sleep(rand(2000, 4000));
-  await scrollToBottom(page);
+  await scrollToBottom(page, device);
   await sleep(rand(1000, 2000));
 
   console.log('--- Searching for target link ---');
@@ -1120,7 +1194,7 @@ async function findAndVisitTarget(page, targetDomain) {
     console.log('Found link:', foundUrl);
 
     await sleep(rand(1000, 2000));
-    await humanMouse(page);
+    await humanActivity(page, device);
 
     console.log('--- Clicking target link ---');
     // Yandex SERP links usually open in a NEW TAB (target="_blank"),
@@ -1131,7 +1205,13 @@ async function findAndVisitTarget(page, targetDomain) {
       // inside it (never the exact center).
       let clickAction;
       const box = await targetLink.boundingBox();
-      if (box) {
+      if (device === 'mobile' && box) {
+        // Real touch tap — phones have no hover/mousemove
+        const cx = box.x + box.width * rand(35, 65) / 100;
+        const cy = box.y + box.height * rand(35, 65) / 100;
+        await sleep(rand(400, 900));
+        clickAction = page.touchscreen.tap(cx, cy);
+      } else if (box) {
         const cx = box.x + box.width * rand(30, 70) / 100;
         const cy = box.y + box.height * rand(35, 65) / 100;
         await page.mouse.move(cx, cy, { steps: rand(10, 20) });
@@ -1183,17 +1263,17 @@ async function findAndVisitTarget(page, targetDomain) {
     await page.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true });
     console.log(`Screenshot saved: ${targetDomain}_from_yandex.png`);
 
-    await visitSite(page, targetDomain);
+    await visitSite(page, targetDomain, device);
     return true;
   }
 }
 
-async function visitSite(page, targetDomain) {
+async function visitSite(page, targetDomain, device = 'desktop') {
   const domainsToMatch = buildDomains(targetDomain);
   // Human-like browsing on the target site
   await sleep(rand(2000, 4000));
-  await humanMouse(page);
-  await scrollToBottom(page);
+  await humanActivity(page, device);
+  await scrollToBottom(page, device);
   await sleep(rand(1500, 3000));
 
   console.log('--- Browsing target site ---');
@@ -1252,7 +1332,14 @@ async function visitSite(page, targetDomain) {
 
       const box = await handle.boundingBox();
       let clickAction;
-      if (box) {
+      if (device === 'mobile' && box) {
+        // Real touch tap (no mouse on phones)
+        await sleep(rand(300, 700));
+        clickAction = page.touchscreen.tap(
+          box.x + box.width * rand(35, 65) / 100,
+          box.y + box.height * rand(35, 65) / 100
+        );
+      } else if (box) {
         // Human click: hover, then click a random point inside the link
         await page.mouse.move(
           box.x + box.width * rand(30, 70) / 100,
@@ -1284,8 +1371,8 @@ async function visitSite(page, targetDomain) {
 
       // Read the page like a human before moving on
       await sleep(rand(2500, 6000));
-      await humanMouse(page);
-      await scrollToBottom(page);
+      await humanActivity(page, device);
+      await scrollToBottom(page, device);
       await sleep(rand(1500, 3500));
 
       await page.screenshot({ path: `./${targetDomain.replace(/\./g, '_')}_page_${clickedCount}.png`, fullPage: true }).catch(() => {});
