@@ -756,7 +756,7 @@ async function scrollToBottom(page, device = 'desktop') {
   });
 }
 
-const TRANSIENT_NET_ERRORS = /ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_(RESET|CLOSED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_PROXY_CONNECTION_FAILED|TimeoutError/i;
+const TRANSIENT_NET_ERRORS = /ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_(RESET|CLOSED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_PROXY_CONNECTION_FAILED|TimeoutError|Navigation timeout|Navigation failed because browser has disconnected/i;
 
 function formatSearchFailure(result) {
   if (!result) return 'Search attempts failed: no result details.';
@@ -791,7 +791,7 @@ async function gotoWithRetry(page, url, options = {}, attempts = 3) {
       lastErr = e;
       const msg = e && e.message ? e.message : String(e);
       if (!TRANSIENT_NET_ERRORS.test(msg)) throw e;
-      console.log(`  Nav attempt ${i}/${attempts} failed (${msg.split('\n')[0].substring(0, 90)}), waiting out IP rotation...`);
+      console.log(`  Nav attempt ${i}/${attempts} failed (${msg.split('\n')[0].substring(0, 90)}), retrying navigation...`);
       if (i < attempts) await sleep(rand(6000, 12000));
     }
   }
@@ -948,7 +948,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       console.log('  Search input not found on ya.ru, navigating directly...');
       // Direct Yandex search URL — the most reliable method
       const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
-      await gotoWithRetry(mainPage, directUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await gotoWithRetry(mainPage, directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     }
 
     await sleep(rand(4000, 7000));
@@ -1012,7 +1012,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
           await gotoWithRetry(mainPage, directUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 30000
+            timeout: 45000
           });
           await sleep(rand(4000, 7000));
 
