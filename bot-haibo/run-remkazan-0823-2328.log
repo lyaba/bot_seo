@@ -1,0 +1,678 @@
+◇ injected env (4) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+=== Yandex Search & Visit Bot ===
+Project: rem-kazan
+Target: rem-kazan.ru
+Device: mobile
+Queries (6): казань ремонт квартир | ремонт квартир под ключ казань | ремонт под ключ казань | ремонт квартир в казани под ключ | ремонт квартир эконом казань | ремонт студии казань
+Proxy: res.geonix.com:10000
+
+--- Testing proxy connectivity ---
+  Proxy attempt 1/3 failed: net::ERR_TUNNEL_CONNECTION_FAILED at https://api.ipify.org?format=json
+Proxy IP: {"ip":"88.135.61.67"}
+
+
+========== QUERY 1/6: казань ремонт квартир ==========
+--- Opening ya.ru ---
+  Nav attempt 1/3 failed (net::ERR_TUNNEL_CONNECTION_FAILED at https://ya.ru/), waiting out IP rotation...
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+CAPTCHA detected! Trying checkbox click first...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch/?text=%D0%BA%D0%B0%D0%B7%D0%B0%D0%BD%D1%8C+%D1%80%D0%B5%D0%BC%D0%BE%D
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+CAPTCHA on page 6, trying checkbox click...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D0%BA%D0%B0%D0%B7%D0%B0%D0%BD%D1%8C+%D1%80%D0%B5%D0%BC%D0%BE%D0
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 32 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 36 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+  Direct nav attempt 1/2 failed: net::ERR_TUNNEL_CONNECTION_FAILED at https://rem-kazan.ru/
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B9-%D0%B8-%D1%81%D0%BE%D0%BE%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D0%B9/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+  Clicking internal link: https://rem-kazan.ru/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+  Clicking internal link: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%D0%BB%D0%BA%D0%B0-%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80-%D0%BE%D1%84%D0%B8%D1%81%D0%BE%D0%B2-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2/
+  Navigated to: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2-%D0%B1%D0%B0%D0%BD%D1%8C-%D0%B8-%D0%BF%D0%B0%D1%80%D0%BD%D1%8B%D1%85/
+  Navigated to: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 4
+
+--- Pausing 74s before next query ---
+
+========== QUERY 2/6: ремонт квартир под ключ казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2-%D0%B1%D0%B0%D0%BD%D1%8C-%D0%B8-%D0%BF%D0%B0%D1%80%D0%BD%D1%8B%D1%85/
+  Navigated to: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D0%BF%D1%80%D0%BE%D0%B8%D0%B7%D0%B2%D0%BE%D0%B4%D1%81%D1%82%D0%B2%D0%BE-%D0%BC%D0%B5%D0%B1%D0%B5%D0%BB%D0%B8-%D0%BD%D0%B0-%D0%B7/
+  Navigated to: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 2
+
+--- Pausing 64s before next query ---
+
+========== QUERY 3/6: ремонт под ключ казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+CAPTCHA on page 2, trying checkbox click...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D0%BF%D0%BE%D0%B4+%D0%BA%D
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D0%BF%D1%80%D0%BE%D0%B8%D0%B7%D0%B2%D0%BE%D0%B4%D1%81%D1%82%D0%B2%D0%BE-%D0%BC%D0%B5%D0%B1%D0%B5%D0%BB%D0%B8-%D0%BD%D0%B0-%D0%B7/
+  Navigated to: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D
+  Clicking internal link: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%D0%BB%D0%BA%D0%B0-%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80-%D0%BE%D1%84%D0%B8%D1%81%D0%BE%D0%B2-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2/
+  Navigated to: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%
+  Clicking internal link: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B9-%D0%B8-%D1%81%D0%BE%D0%BE%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D0%B9/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 3
+
+--- Pausing 71s before next query ---
+
+========== QUERY 4/6: ремонт квартир в казани под ключ ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+CAPTCHA on page 2, trying checkbox click...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D0%BA%D0%B2%D0%B0%D1%80%D1
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 29 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 33 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 24 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 28 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 24 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 28 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 24 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 28 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 24 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 28 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 24 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 28 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2-%D0%B1%D0%B0%D0%BD%D1%8C-%D0%B8-%D0%BF%D0%B0%D1%80%D0%BD%D1%8B%D1%85/
+  Navigated to: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D0%BF%D1%80%D0%BE%D0%B8%D0%B7%D0%B2%D0%BE%D0%B4%D1%81%D1%82%D0%B2%D0%BE-%D0%BC%D0%B5%D0%B1%D0%B5%D0%BB%D0%B8-%D0%BD%D0%B0-%D0%B7/
+  Navigated to: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D
+  Clicking internal link: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B9-%D0%B8-%D1%81%D0%BE%D0%BE%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D0%B9/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 3
+
+--- Pausing 66s before next query ---
+
+========== QUERY 5/6: ремонт квартир эконом казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+CAPTCHA detected! Trying checkbox click first...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D0%BA%D0%B2%D0%B0%D1%80%D1
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B9-%D0%B8-%D1%81%D0%BE%D0%BE%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D0%B9/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+  Clicking internal link: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%D0%BB%D0%BA%D0%B0-%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80-%D0%BE%D1%84%D0%B8%D1%81%D0%BE%D0%B2-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2/
+  Navigated to: https://rem-kazan.ru/%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82-%D0%B8-%D0%BE%D1%82%D0%B4%D0%B5%
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0%B2%D0%BE-%D0%B4%D0%BE%D0%BC%D0%BE%D0%B2-%D0%B1%D0%B0%D0%BD%D1%8C-%D0%B8-%D0%BF%D0%B0%D1%80%D0%BD%D1%8B%D1%85/
+  Navigated to: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0
+  Clicking internal link: https://rem-kazan.ru/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B/
+  Navigated to: https://rem-kazan.ru/%D1%81%D1%82%D1%80%D0%BE%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D1%82%D0
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 4
+
+--- Pausing 65s before next query ---
+
+========== QUERY 6/6: ремонт студии казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+CAPTCHA detected! Trying checkbox click first...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D1%81%D1%82%D1%83%D0%B4%D0
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 20 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 24 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---
+
+=== RESULT ===
+Final URL: https://rem-kazan.ru/
+Target domain reached: YES
+Screenshot saved: rem-kazan.ru_from_yandex.png
+--- Browsing target site ---
+  Clicking internal link: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D0%BF%D1%80%D0%BE%D0%B8%D0%B7%D0%B2%D0%BE%D0%B4%D1%81%D1%82%D0%B2%D0%BE-%D0%BC%D0%B5%D0%B1%D0%B5%D0%BB%D0%B8-%D0%BD%D0%B0-%D0%B7/
+  Navigated to: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D
+  Clicking internal link: https://rem-kazan.ru/%D0%BA%D0%BE%D0%BD%D1%82%D0%B0%D0%BA%D1%82%D1%8B/
+  Navigated to: https://rem-kazan.ru/%D1%81%D0%BE%D0%B1%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%BE%D0%B5-%D
+  Clicking internal link: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B9-%D0%B8-%D1%81%D0%BE%D0%BE%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D0%B9/
+  Navigated to: https://rem-kazan.ru/%D0%B4%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%D0%B0%D0%B6-%D0%B7%D0%B4%D0%B0%D
+Final screenshot saved: rem-kazan_ru_final.png
+Total internal links clicked: 3
+
+=== SUMMARY ===
+OK   | казань ремонт квартир
+OK   | ремонт квартир под ключ казань
+OK   | ремонт под ключ казань
+OK   | ремонт квартир в казани под ключ
+OK   | ремонт квартир эконом казань
+OK   | ремонт студии казань
+--- Closing browser ---
+Done.

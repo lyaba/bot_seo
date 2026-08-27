@@ -1,0 +1,114 @@
+◇ injected env (4) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+=== Yandex Search & Visit Bot ===
+Project: rem-kazan
+Target: rem-kazan.ru
+Device: mobile
+Queries (6): казань ремонт квартир | ремонт квартир под ключ казань | ремонт под ключ казань | ремонт квартир в казани под ключ | ремонт квартир эконом казань | ремонт студии казань
+Proxy: res.geonix.com:10000
+
+--- Testing proxy connectivity ---
+  Proxy attempt 1/3 failed: net::ERR_TUNNEL_CONNECTION_FAILED at https://api.ipify.org?format=json
+  Proxy attempt 2/3 failed: net::ERR_TUNNEL_CONNECTION_FAILED at https://api.ipify.org?format=json
+Proxy IP: {"ip":"88.135.61.67"}
+
+
+========== QUERY 1/6: казань ремонт квартир ==========
+--- Opening ya.ru ---
+Query failed: net::ERR_TUNNEL_CONNECTION_FAILED at https://ya.ru/
+
+--- Pausing 89s before next query ---
+
+========== QUERY 2/6: ремонт квартир под ключ казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+CAPTCHA detected! Trying checkbox click first...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch/?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D0%BA%D0%B2%D0%B0%D1%80%D
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 2 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 3 of results ---
+CAPTCHA on page 3, trying checkbox click...
+  ✓ Checkbox passed! Redirected to: https://yandex.ru/search/touch?text=%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82+%D0%BA%D0%B2%D0%B0%D1%80%D1
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 4 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 5 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 6 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Checking page 7 of results ---
+--- Searching for target link ---
+  Selector ".organic__href a[href]" -> 0 links
+  Selector ".serp-item a[href]" -> 21 links
+  Selector "a.url" -> 0 links
+  Selector "a[class*="Link"]" -> 25 links
+  Selector ".result-item a[href]" -> 0 links
+  Selector ".normal-link" -> 0 links
+  Selector "a[href*="rem-kazan.ru"]" -> 0 links
+  Trying all <a> tags...
+WARNING: Could not find rem-kazan.ru on this page of results
+
+--- Target not found in top 7 pages, navigating directly ---

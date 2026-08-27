@@ -1,0 +1,24 @@
+◇ injected env (4) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+=== Yandex Search & Visit Bot ===
+Project: rem-kazan
+Target: rem-kazan.ru
+Device: mobile
+Queries (8): заказть ремонт квартир под ключ казань | компании по ремонту квартир казань | казань ремонт квартир | ремонт квартир под ключ казань | рем ремонт под ключ казань | ремонт квартир в казани под ключ | ремонт квартир эконом казань рем | ремонт коммерческих помещений казань
+Proxy: res.geonix.com:10000
+
+--- Testing proxy connectivity ---
+Proxy IP: {"ip":"194.85.210.60"}
+
+
+========== QUERY 1/8: заказть ремонт квартир под ключ казань ==========
+--- Opening ya.ru ---
+--- Using ya.ru search ---
+  Found input via: #text
+Current URL: https://ya.ru/
+No results on current page, trying direct search...
+Query failed: Navigation timeout of 30000 ms exceeded
+
+--- Pausing 68s before next query ---
+
+========== QUERY 2/8: компании по ремонту квартир казань ==========
+--- Opening ya.ru ---
