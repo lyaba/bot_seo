@@ -246,6 +246,8 @@ The following patterns are repeated across all three projects:
 - Confirmed issue fixed: if CapMonster is still `processing` when the solver wall-clock timeout expires, `yandex_search_visit.js` treats it as a terminal `solver-timeout` and stops further solver retries/alternate URLs to avoid creating additional paid tasks.
 - Confirmed project addition: `bot-haibo/projects.json` includes `remont-okon` for `remont-okonkzn.ru` with mobile device mode and window-repair queries.
 - Confirmed launcher addition: `bot-haibo/remont-okon.sh` runs `node yandex_search_visit.js --project remont-okon`.
+- Confirmed project addition: `bot-haibo/projects.json` includes `horgos-auto` for `horgos-auto.com` with mobile device mode and China car-order queries.
+- Confirmed launcher addition: `bot-haibo/horgos-auto.sh` runs `node yandex_search_visit.js --project horgos-auto`.
 - Confirmed issue fixed: Puppeteer `Navigation timeout of 30000 ms exceeded` is now treated as a transient navigation/proxy error by `gotoWithRetry`, and direct Yandex search fallback timeouts were increased from 30000 ms to 45000 ms. This addresses `rem-kazan` failures immediately after `No results on current page, trying direct search...`.
 
 ---
@@ -678,6 +680,7 @@ Goal: visit haibomotor.ru from Yandex SERP by queries with behavioral factor, th
 19. **top-design-remont first full run (2026-08-23 22:26)** — SUMMARY 5/6 OK: «ремонт квартир под ключ казань», «ремонт под ключ казань», «ремонт квартир в казани под ключ», «ремонт квартир эконом казань», «ремонт студии казань» = OK; «казань ремонт квартир» = FAIL (reason needs log check — likely tunnel/captcha). NOTE: OK means site reached (SERP click OR direct fallback — both return true). Distinguish via log lines: `Found link:` = real SERP transition with ysclid; `navigating directly` = behavioral-only visit. Warm-up profile created; IDN matching worked across all 7 pages per query.
 20. **Recommended run practice**: save full logs for post-analysis: `./run-top-design.sh 2>&1 | tee run-$(date +%m%d-%H%M).log` — enables counting real SERP transitions vs direct visits per query.
 21. **Touch-mode for device:"mobile"** — closes the "phone with a mouse" detection gap: real touch events via `page.touchscreen` (`tap` for clicks, `touchStart/touchMove/touchEnd` swipes for scrolling and ambient activity); NO mousemove/mouse-click events emitted in mobile mode; inertial flick-scrolls (fast start, decelerating tail) replace window.scrollBy; captcha checkbox tapped; SERP and internal links tapped at jittered points. Desktop mode unchanged (mouse moves/clicks). Device param threaded through runSearchAndVisit → tryClickCaptchaCheckbox / findAndVisitTarget / visitSite / warmUpProfile. Metrica robot-check should now see consistent phone behavior.
+22. **Profile reset practice** — delete only one accumulated browser profile at a time with `rm -rf bot-haibo/.profiles/<project>`. Confirmed cleanup: `bot-haibo/.profiles/top-design-remont` was removed on request; other project profiles remained intact. Routine deletion is not needed after every run; reset a profile when captcha/reputation gets stuck, cookies look poisoned, project config/device changed, or after a long noisy/debug run.
 
 ### GIT SNAPSHOT (this commit)
 

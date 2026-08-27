@@ -263,23 +263,28 @@ def create_captcha_task_cloud(config, captcha_url, website_key, proxy=None, dead
     api_url = config["cloud"]["api_url"]
     headers = {"Content-Type": "application/json"}
     proxy_fields = parse_proxy(proxy)
+    user_agent = config.get("solving", {}).get("user_agent")
 
     payload = {
         "clientKey": config["cloud"].get("api_key", ""),
         "task": {
-            "type": "NoCaptchaTaskProxyless",
+            "type": "RecaptchaV2Task",
             "websiteURL": captcha_url,
             "websiteKey": website_key,
         }
     }
+    if user_agent:
+        payload["task"]["userAgent"] = user_agent
 
     if proxy_fields:
         payload["task"] = {
-            "type": "NoCaptchaTask",
+            "type": "RecaptchaV2Task",
             "websiteURL": captcha_url,
             "websiteKey": website_key,
             **proxy_fields,
         }
+        if user_agent:
+            payload["task"]["userAgent"] = user_agent
 
     retries = config["solving"].get("task_create_retries", 3)
     return post_create_task(api_url, payload, headers, retries, api_proxies, deadline)
@@ -338,23 +343,28 @@ def create_captcha_task_local(config, captcha_url, website_key, proxy=None, dead
     server = config["local"]["server_url"]
     headers = {"Content-Type": "application/json"}
     proxy_fields = parse_proxy(proxy)
+    user_agent = config.get("solving", {}).get("user_agent")
 
     payload = {
         "clientKey": config["local"].get("api_key", ""),
         "task": {
-            "type": "NoCaptchaTaskProxyless",
+            "type": "RecaptchaV2Task",
             "websiteURL": captcha_url,
             "websiteKey": website_key,
         }
     }
+    if user_agent:
+        payload["task"]["userAgent"] = user_agent
 
     if proxy_fields:
         payload["task"] = {
-            "type": "NoCaptchaTask",
+            "type": "RecaptchaV2Task",
             "websiteURL": captcha_url,
             "websiteKey": website_key,
             **proxy_fields,
         }
+        if user_agent:
+            payload["task"]["userAgent"] = user_agent
 
     retries = config["solving"].get("task_create_retries", 3)
     return post_create_task(server, payload, headers, retries, deadline=deadline)

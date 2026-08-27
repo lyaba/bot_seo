@@ -15,6 +15,26 @@ function rand(min, max) {
   return Math.floor(min + Math.random() * (max - min));
 }
 
+function safeFilePart(value) {
+  return String(value || 'unknown').replace(/[^a-z0-9а-яё._-]+/giu, '_').replace(/^_+|_+$/g, '');
+}
+
+async function saveCaptchaScreenshot(page, label = 'captcha') {
+  try {
+    const dir = path.join(__dirname, '.captcha-screenshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = `${stamp}_${safeFilePart(label)}.png`;
+    const screenshotPath = path.join(dir, file);
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    console.log(`  📸 Captcha screenshot saved: ${screenshotPath}`);
+    return screenshotPath;
+  } catch (e) {
+    console.log(`  ⚠️ Failed to save captcha screenshot: ${e.message}`);
+    return null;
+  }
+}
+
 // ─── Human-like helpers ──────────────────────────────────
 
 // Device profiles keep the fingerprint CONSISTENT with the proxy type:
@@ -200,7 +220,7 @@ function formatPythonFailure(result, redactionSecrets = []) {
 }
 
 const SOLVER_TRANSPORT_ERRORS = /ProxyError|Unable to connect to proxy|Tunnel connection failed|Node has rejected the request|ConnectTimeout|Read timed out|ConnectionError|Max retries exceeded/i;
-const SOLVER_TERMINAL_RETRY_ERRORS = /Captcha solver wall-clock timeout reached|Captcha solving timed out/i;
+const SOLVER_TERMINAL_RETRY_ERRORS = /Captcha solver wall-clock timeout reached|Captcha solving timed out|ERROR_CAPTCHA_UNSOLVABLE/i;
 
 async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   console.log('  🧩 Solving captcha via Python/CapMonster...');
@@ -235,7 +255,7 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   
   const pythonPath = '/usr/bin/python3';
   const scriptPath = path.join(__dirname, 'solve_captcha.py');
-  const solverTimeoutMs = 150000;
+  const solverTimeoutMs = 330000;
 
   if (!fs.existsSync(scriptPath)) {
     throw new Error(`Captcha solver script not found: ${scriptPath}`);
@@ -312,7 +332,7 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
     }
 
     if (SOLVER_TERMINAL_RETRY_ERRORS.test(lastError)) {
-      throw new Error(`Captcha solver timed out while CapMonster was still processing; stopping retries to avoid creating more paid tasks. Last error: ${lastError}`);
+      throw new Error(`Captcha solver returned a terminal result; stopping retries and moving to the next query. Last error: ${lastError}`);
     }
     
     if (attempt < maxRetries) {
@@ -581,17 +601,18 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
         
         // Wait for captcha iframe to load
         await sleep(rand(3000, 5000));
+        await saveCaptchaScreenshot(page, `solver_${safeFilePart(query)}`);
         
         // Try to solve the captcha
         let token = null;
         try {
           token = await solveCaptchaWithPython(page, proxyAuth);
         } catch (e) {
-          const reason = SOLVER_TERMINAL_RETRY_ERRORS.test(e.message || String(e)) ? 'solver-timeout' : 'solver';
+          const reason = SOLVER_TERMINAL_RETRY_ERRORS.test(e.message || String(e)) ? 'solver-terminal' : 'solver';
           lastFailure = { reason, error: e.message };
           console.log(`  ✗ Python captcha solver failed: ${e.message}`);
           await page.close();
-          if (reason === 'solver-timeout') {
+          if (reason === 'solver-terminal') {
             return { success: false, ...lastFailure };
           }
           continue;
@@ -768,6 +789,9 @@ function formatSearchFailure(result) {
   }
   if (result.reason === 'solver-timeout') {
     return `Captcha solver timed out while CapMonster was still processing: ${result.error}`;
+  }
+  if (result.reason === 'solver-terminal') {
+    return `Captcha solver stopped after a terminal CapMonster result: ${result.error}`;
   }
   if (result.reason === 'captcha') {
     return `All search attempts failed due to CAPTCHA: ${result.error}`;
@@ -958,6 +982,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
 
     if (isCaptchaPage(currentPageUrl)) {
       console.log('CAPTCHA detected! Trying checkbox click first...');
+      await saveCaptchaScreenshot(mainPage, `${targetDomain}_initial`);
       if (await tryClickCaptchaCheckbox(mainPage, device)) {
         activePage = mainPage;
       } else {
@@ -982,6 +1007,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       const newUrl = mainPage.url();
       if (isCaptchaPage(newUrl)) {
         console.log('CAPTCHA detected after search! Trying checkbox click first...');
+        await saveCaptchaScreenshot(mainPage, `${targetDomain}_after_search`);
         if (await tryClickCaptchaCheckbox(mainPage, device)) {
           activePage = mainPage;
         } else {
@@ -1019,6 +1045,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           const checkUrl = mainPage.url();
           if (isCaptchaPage(checkUrl)) {
             console.log('CAPTCHA detected! Trying checkbox click first...');
+            await saveCaptchaScreenshot(mainPage, `${targetDomain}_direct_search`);
             if (await tryClickCaptchaCheckbox(mainPage, device)) {
               activePage = mainPage;
             } else {

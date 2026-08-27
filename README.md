@@ -38,6 +38,18 @@ flutter run
 - `bot-haibo/run-rem-kazan.sh` — проект `rem-kazan`
 - `bot-haibo/run-top-design.sh` — проект `top-design-remont`
 - `bot-haibo/remont-okon.sh` — проект `remont-okon`
+- `bot-haibo/horgos-auto.sh` — проект `horgos-auto`
+
+Первый запуск на новом компьютере:
+
+```bash
+cd bot-haibo
+npm install
+cp .env.example .env
+cp config/captcha.example.json config/captcha.json
+```
+
+После этого заполните `.env` данными прокси, а в `config/captcha.json` укажите `cloud.api_key` CapMonster. Профили браузера создаются автоматически в `.profiles/<project>`.
 
 Текущая схема CapMonster:
 

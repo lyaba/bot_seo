@@ -1,0 +1,19 @@
+{
+  "mode": "cloud",
+  "cloud": {
+    "api_url": "https://ru.api.capmonster.cloud",
+    "api_key": "",
+    "timeout": 300,
+    "poll_interval": 3
+  },
+  "local": {
+    "server_url": "http://localhost:3000",
+    "api_key": "",
+    "timeout": 300,
+    "poll_interval": 3
+  },
+  "solving": {
+    "proxy_for_solving": null,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+  }
+}
