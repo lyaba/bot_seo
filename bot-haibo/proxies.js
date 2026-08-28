@@ -1,4 +1,6 @@
-require('dotenv').config();
+const path = require('path');
+
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
 const DEFAULT_HAIBO_PROXY_HOST = '209.101.201.73';
 const DEFAULT_HAIBO_PROXY_PORT = '59100';
