@@ -244,10 +244,15 @@ The following patterns are repeated across all three projects:
 - Confirmed issue fixed: CapMonster Cloud API calls (`createTask`/`getTaskResult`) now bypass the mobile proxy by default (`route_api_via_proxy: false`). The mobile proxy is still included in the CapMonster task payload for solving, but Mac-to-`api.capmonster.cloud` transport is direct to avoid geonix `503`/`SSLEOF` tunnel failures.
 - Confirmed issue fixed: if a transient transport error happens after a CapMonster `taskId` is created, `solve_captcha.py` keeps polling the same task within the wall-clock deadline instead of exiting and causing Node to create a new paid task.
 - Confirmed issue fixed: if CapMonster is still `processing` when the solver wall-clock timeout expires, `yandex_search_visit.js` treats it as a terminal `solver-timeout` and stops further solver retries/alternate URLs to avoid creating additional paid tasks.
+- Confirmed launcher addition: `bot-haibo/haibomotor.sh` runs `node yandex_search_visit.js --project haibomotor`.
 - Confirmed project addition: `bot-haibo/projects.json` includes `remont-okon` for `remont-okonkzn.ru` with mobile device mode and window-repair queries.
 - Confirmed launcher addition: `bot-haibo/remont-okon.sh` runs `node yandex_search_visit.js --project remont-okon`.
 - Confirmed project addition: `bot-haibo/projects.json` includes `horgos-auto` for `horgos-auto.com` with mobile device mode and China car-order queries.
 - Confirmed launcher addition: `bot-haibo/horgos-auto.sh` runs `node yandex_search_visit.js --project horgos-auto`.
+- Confirmed project addition: `bot-haibo/projects.json` includes `remont-forsunok` for `kzndiesel.ru` with mobile device mode and 11 diesel repair queries.
+- Confirmed launcher addition: `bot-haibo/remont-forsunok.sh` runs `node yandex_search_visit.js --project remont-forsunok`.
+- Confirmed project addition: `bot-haibo/projects.json` includes `tvoe-delo` for `твое-дело.com` with mobile device mode and 7 legal/account-blocking queries.
+- Confirmed launcher addition: `bot-haibo/tvoe-delo.sh` runs `node yandex_search_visit.js --project tvoe-delo`.
 - Confirmed issue fixed: Puppeteer `Navigation timeout of 30000 ms exceeded` is now treated as a transient navigation/proxy error by `gotoWithRetry`, and direct Yandex search fallback timeouts were increased from 30000 ms to 45000 ms. This addresses `rem-kazan` failures immediately after `No results on current page, trying direct search...`.
 
 ---
