@@ -1158,6 +1158,197 @@ function buildDomains(targetDomain) {
   return list;
 }
 
+async function collectInternalLinkCandidates(page, domainsToMatch, visited) {
+  return await page.evaluate((domainList, excludeList) => {
+    const exclude = new Set(excludeList);
+    const seen = new Set();
+    const fileRe = /\.(png|jpe?g|gif|svg|webp|pdf|zip|rar|docx?|xlsx?|mp4|mp3)(\?|$)/i;
+
+    function normalize(raw) {
+      try {
+        const url = new URL(raw, window.location.href);
+        if (!/^https?:$/.test(url.protocol)) return null;
+        url.hash = '';
+        return url.href;
+      } catch {
+        return null;
+      }
+    }
+
+    function sameTargetDomain(href) {
+      try {
+        const host = new URL(href).hostname;
+        return domainList.some(dm => host === dm || host.endsWith(`.${dm}`));
+      } catch {
+        return false;
+      }
+    }
+
+    function add(raw, source) {
+      const href = normalize(raw);
+      const hrefUrl = href ? new URL(href) : null;
+      const currentUrl = new URL(window.location.href);
+      if (
+        !href ||
+        (
+          hrefUrl &&
+          hrefUrl.hostname === currentUrl.hostname &&
+          hrefUrl.pathname.replace(/\/+$/, '') === currentUrl.pathname.replace(/\/+$/, '')
+        ) ||
+        seen.has(href) ||
+        exclude.has(href) ||
+        !sameTargetDomain(href) ||
+        fileRe.test(href)
+      ) {
+        return null;
+      }
+      seen.add(href);
+      return { href, source };
+    }
+
+    const candidates = [];
+    for (const a of document.querySelectorAll('a[href]')) {
+      const candidate = add(a.getAttribute('href'), 'dom-link');
+      if (candidate) candidates.push(candidate);
+    }
+
+    return candidates.slice(0, 20);
+  }, domainsToMatch, Array.from(visited)).catch(() => []);
+}
+
+async function tryOpenMobileMenu(page, device = 'desktop') {
+  const opened = await page.evaluate(() => {
+    const pattern = /(menu|burger|hamburger|nav|меню|каталог)/i;
+    const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [aria-controls], [aria-expanded]'));
+
+    for (const el of controls) {
+      const text = [
+        el.textContent,
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('class'),
+        el.getAttribute('id'),
+        el.getAttribute('data-testid')
+      ].filter(Boolean).join(' ');
+
+      const rect = el.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0;
+      if (visible && pattern.test(text)) {
+        el.scrollIntoView({ block: 'center' });
+        el.click();
+        return true;
+      }
+    }
+
+    return false;
+  }).catch(() => false);
+
+  if (opened) {
+    console.log('  Opened possible mobile menu, recollecting internal links...');
+    await sleep(device === 'mobile' ? rand(900, 1600) : rand(500, 1000));
+  }
+
+  return opened;
+}
+
+async function collectInternalFallbackUrls(page, domainsToMatch, visited) {
+  return await page.evaluate(async (domainList, excludeList) => {
+    const exclude = new Set(excludeList);
+    const seen = new Set();
+    const fileRe = /\.(png|jpe?g|gif|svg|webp|pdf|zip|rar|docx?|xlsx?|mp4|mp3)(\?|$)/i;
+
+    function normalize(raw) {
+      try {
+        const url = new URL(raw, window.location.href);
+        if (!/^https?:$/.test(url.protocol)) return null;
+        url.hash = '';
+        return url.href;
+      } catch {
+        return null;
+      }
+    }
+
+    function sameTargetDomain(href) {
+      try {
+        const host = new URL(href).hostname;
+        return domainList.some(dm => host === dm || host.endsWith(`.${dm}`));
+      } catch {
+        return false;
+      }
+    }
+
+    function add(raw, source, output) {
+      const href = normalize(raw);
+      const hrefUrl = href ? new URL(href) : null;
+      const currentUrl = new URL(window.location.href);
+      if (
+        !href ||
+        (
+          hrefUrl &&
+          hrefUrl.hostname === currentUrl.hostname &&
+          hrefUrl.pathname.replace(/\/+$/, '') === currentUrl.pathname.replace(/\/+$/, '')
+        ) ||
+        seen.has(href) ||
+        exclude.has(href) ||
+        !sameTargetDomain(href) ||
+        fileRe.test(href)
+      ) {
+        return;
+      }
+      seen.add(href);
+      output.push({ href, source });
+    }
+
+    const output = [];
+
+    async function getJson(resourcePath) {
+      try {
+        const response = await fetch(resourcePath, { credentials: 'same-origin' });
+        if (!response.ok) return null;
+        return await response.json();
+      } catch {
+        return null;
+      }
+    }
+
+    const pages = await getJson('/wp-json/wp/v2/pages?per_page=20&_fields=link,status');
+    if (Array.isArray(pages)) {
+      for (const item of pages) {
+        if (!item.status || item.status === 'publish') add(item.link, 'wp-pages', output);
+      }
+    }
+
+    const posts = await getJson('/wp-json/wp/v2/posts?per_page=20&_fields=link,status');
+    if (Array.isArray(posts)) {
+      for (const item of posts) {
+        if (!item.status || item.status === 'publish') add(item.link, 'wp-posts', output);
+      }
+    }
+
+    if (output.length) return output.slice(0, 20);
+
+    async function getText(resourcePath) {
+      try {
+        const response = await fetch(resourcePath, { credentials: 'same-origin' });
+        if (!response.ok) return '';
+        return await response.text();
+      } catch {
+        return '';
+      }
+    }
+
+    for (const resourcePath of ['/wp-sitemap.xml', '/sitemap.xml']) {
+      const text = await getText(resourcePath);
+      for (const match of text.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)) {
+        add(match[1], 'sitemap', output);
+      }
+      if (output.length) break;
+    }
+
+    return output.slice(0, 20);
+  }, domainsToMatch, Array.from(visited)).catch(() => []);
+}
+
 async function warmUpProfile(browser, proxyAuth, device, profileDir) {
   const marker = path.join(profileDir, '.warmed');
   if (fs.existsSync(marker)) return;
@@ -1461,84 +1652,101 @@ async function visitSite(page, targetDomain, device = 'desktop') {
   for (let round = 0; round < maxClicks + 2 && clickedCount < maxClicks; round++) {
     let candidates = [];
     try {
-      candidates = await page.evaluate((domainList, excludeList) => {
-        const exclude = new Set(excludeList);
-        const fileRe = /\.(png|jpe?g|gif|svg|webp|pdf|zip|rar|docx?|xlsx?|mp4|mp3)(\?|$)/i;
-        return Array.from(document.querySelectorAll('a[href]'))
-          .map(a => a.href)
-          .filter(href =>
-            href &&
-            domainList.some(dm => href.includes(dm)) &&
-            !href.includes('#') &&
-            !href.startsWith('javascript') &&
-            !fileRe.test(href) &&
-            !exclude.has(href)
-          )
-          .slice(0, 10);
-      }, domainsToMatch, Array.from(visited)).catch(() => []);
+      candidates = await collectInternalLinkCandidates(page, domainsToMatch, visited);
+
+      if (!candidates.length && round === 0) {
+        await tryOpenMobileMenu(page, device);
+        candidates = await collectInternalLinkCandidates(page, domainsToMatch, visited);
+      }
+
+      if (!candidates.length) {
+        candidates = await collectInternalFallbackUrls(page, domainsToMatch, visited);
+        if (candidates.length) {
+          console.log(`  Found ${candidates.length} internal fallback URLs via ${candidates[0].source}`);
+        }
+      }
     } catch (e) {
       break;
     }
 
-    if (!candidates.length) break;
+    if (!candidates.length) {
+      console.log('  No internal links found for browsing on this page');
+      break;
+    }
 
     // Pick one of the first few candidates (humans click what they see first)
     const chosen = candidates[Math.floor(Math.random() * Math.min(candidates.length, 4))];
+    const chosenHref = typeof chosen === 'string' ? chosen : chosen.href;
+    const chosenSource = typeof chosen === 'string' ? 'dom-link' : chosen.source;
 
     // Fresh handle for this round only
     let handle = null;
-    try {
-      for (const el of await page.$$('a[href]')) {
-        const href = await page.evaluate(e => e.href, el).catch(() => null);
-        if (href === chosen) { handle = el; break; }
+    if (chosenSource === 'dom-link') {
+      try {
+        for (const el of await page.$$('a[href]')) {
+          const href = await page.evaluate(e => {
+            try {
+              const url = new URL(e.getAttribute('href'), window.location.href);
+              url.hash = '';
+              return url.href;
+            } catch {
+              return e.href;
+            }
+          }, el).catch(() => null);
+          if (href === chosenHref) { handle = el; break; }
+        }
+      } catch (e) {
+        break;
       }
-    } catch (e) {
-      break;
     }
-    if (!handle) break;
 
     try {
-      console.log(`  Clicking internal link: ${chosen}`);
+      console.log(`  ${handle ? 'Clicking internal link' : 'Opening internal page'}: ${chosenHref}`);
 
-      // Bring the link into view first — off-screen links have no bounding box
-      await handle.evaluate(elem => elem.scrollIntoView({ block: 'center' })).catch(() => {});
-      await sleep(rand(400, 900));
-
-      const box = await handle.boundingBox();
-      let clickAction;
-      if (device === 'mobile' && box) {
-        // Real touch tap (no mouse on phones)
-        await sleep(rand(300, 700));
-        clickAction = page.touchscreen.tap(
-          box.x + box.width * rand(35, 65) / 100,
-          box.y + box.height * rand(35, 65) / 100
-        );
-      } else if (box) {
-        // Human click: hover, then click a random point inside the link
-        await page.mouse.move(
-          box.x + box.width * rand(30, 70) / 100,
-          box.y + box.height * rand(35, 65) / 100,
-          { steps: rand(8, 16) }
-        );
-        await sleep(rand(300, 700));
-
-        clickAction = page.mouse.click(
-          box.x + box.width * rand(35, 65) / 100,
-          box.y + box.height * rand(35, 65) / 100,
-          { delay: rand(50, 130) }
-        );
+      if (!handle) {
+        await sleep(rand(700, 1400));
+        await gotoWithRetry(page, chosenHref, { waitUntil: 'domcontentloaded', timeout: 30000 }, 2);
       } else {
-        // Hidden/unmeasurable element — JS click keeps the referrer and
-        // skips Puppeteer's visibility checks that fail on mobile layouts
-        clickAction = handle.evaluate(elem => elem.click()).catch(() => {});
+        // Bring the link into view first — off-screen links have no bounding box
+        await handle.evaluate(elem => elem.scrollIntoView({ block: 'center' })).catch(() => {});
+        await sleep(rand(400, 900));
+
+        const box = await handle.boundingBox();
+        let clickAction;
+        if (device === 'mobile' && box) {
+          // Real touch tap (no mouse on phones)
+          await sleep(rand(300, 700));
+          clickAction = page.touchscreen.tap(
+            box.x + box.width * rand(35, 65) / 100,
+            box.y + box.height * rand(35, 65) / 100
+          );
+        } else if (box) {
+          // Human click: hover, then click a random point inside the link
+          await page.mouse.move(
+            box.x + box.width * rand(30, 70) / 100,
+            box.y + box.height * rand(35, 65) / 100,
+            { steps: rand(8, 16) }
+          );
+          await sleep(rand(300, 700));
+
+          clickAction = page.mouse.click(
+            box.x + box.width * rand(35, 65) / 100,
+            box.y + box.height * rand(35, 65) / 100,
+            { delay: rand(50, 130) }
+          );
+        } else {
+          // Hidden/unmeasurable element — JS click keeps the referrer and
+          // skips Puppeteer's visibility checks that fail on mobile layouts
+          clickAction = handle.evaluate(elem => elem.click()).catch(() => {});
+        }
+
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
+          clickAction
+        ]);
       }
 
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
-        clickAction
-      ]);
-
-      visited.add(chosen);
+      visited.add(chosenHref);
       visited.add(page.url());
       clickedCount++;
       console.log(`  Navigated to: ${page.url().substring(0, 90)}`);
@@ -1552,7 +1760,7 @@ async function visitSite(page, targetDomain, device = 'desktop') {
       await page.screenshot({ path: `./${targetDomain.replace(/\./g, '_')}_page_${clickedCount}.png`, fullPage: true }).catch(() => {});
     } catch (e) {
       console.log(`  Link click failed: ${e.message}`);
-      visited.add(chosen);
+      visited.add(chosenHref);
     }
   }
 

@@ -254,6 +254,7 @@ The following patterns are repeated across all three projects:
 - Confirmed project addition: `bot-haibo/projects.json` includes `tvoe-delo` for `твое-дело.com` with mobile device mode and 7 legal/account-blocking queries.
 - Confirmed launcher addition: `bot-haibo/tvoe-delo.sh` runs `node yandex_search_visit.js --project tvoe-delo`.
 - Confirmed issue fixed: Puppeteer `Navigation timeout of 30000 ms exceeded` is now treated as a transient navigation/proxy error by `gotoWithRetry`, and direct Yandex search fallback timeouts were increased from 30000 ms to 45000 ms. This addresses `rem-kazan` failures immediately after `No results on current page, trying direct search...`.
+- Confirmed issue fixed: target-site browsing no longer stops immediately when a project page exposes no usable visible internal `<a href>` links. `visitSite()` now keeps normal DOM-link clicks as the primary path, then safely tries opening a mobile menu, then falls back to same-domain WordPress REST API or sitemap URLs. Fallback URLs are same-domain only, skip files/media/external links, and exclude the current path so other projects keep their existing click behavior unless no candidates are found.
 
 ---
 
