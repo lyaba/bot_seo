@@ -218,6 +218,15 @@ The following patterns are repeated across all three projects:
 ## 8. Files Not Fully Examined / Unconfirmed Findings
 
 - bot-haibo architecture and source code — not fully examined
+
+---
+
+## 9. Confirmed Runtime Diagnostics
+
+- `bot-haibo/run-top-design.sh` runs `node yandex_search_visit.js --project top-design-remont`.
+- `top-design-remont` is configured in `bot-haibo/projects.json` with target domain `топ-дизайн-ремонт.рф`, device `mobile`, and 10 Yandex queries.
+- `yandex_search_visit.js` tests proxy connectivity before opening Yandex by visiting `https://api.ipify.org?format=json` through Chromium with `--proxy-server=http://<host>:<port>` and optional `page.authenticate()`.
+- Observed failure `net::ERR_TUNNEL_CONNECTION_FAILED` / navigation timeout happens during that proxy connectivity test, before Yandex search logic starts.
 - Whether fingerprint service is actively used in production — unconfirmed
 - Full list of environment variables required — unconfirmed
 - Database connections and storage mechanisms — partially confirmed only
@@ -255,6 +264,8 @@ The following patterns are repeated across all three projects:
 - Confirmed launcher addition: `bot-haibo/tvoe-delo.sh` runs `node yandex_search_visit.js --project tvoe-delo`.
 - Confirmed issue fixed: Puppeteer `Navigation timeout of 30000 ms exceeded` is now treated as a transient navigation/proxy error by `gotoWithRetry`, and direct Yandex search fallback timeouts were increased from 30000 ms to 45000 ms. This addresses `rem-kazan` failures immediately after `No results on current page, trying direct search...`.
 - Confirmed issue fixed: target-site browsing no longer stops immediately when a project page exposes no usable visible internal `<a href>` links. `visitSite()` now keeps normal DOM-link clicks as the primary path, then safely tries opening a mobile menu, then falls back to same-domain WordPress REST API or sitemap URLs. Fallback URLs are same-domain only, skip files/media/external links, and exclude the current path so other projects keep their existing click behavior unless no candidates are found.
+- Confirmed behavior change: all `bot-haibo` projects now process queries in proxy-IP browser sessions. Default: 4 queries per Chromium session, then the browser closes; the next session checks `api.ipify.org` through the same proxy endpoint and waits for a changed external IP before continuing. Env overrides: `HAIBO_QUERIES_PER_PROXY_SESSION`, `HAIBO_PROXY_ROTATION_CHECK_ATTEMPTS`, `HAIBO_PROXY_ROTATION_WAIT_MS`. If IP never changes after the configured checks, the bot logs a warning and continues to avoid hanging forever.
+- Confirmed issue fixed: proxy-IP rotation waiting now treats `api.ipify.org` tunnel failures (`ERR_TUNNEL_CONNECTION_FAILED` and similar transient proxy check errors) as rotation-in-progress. The bot closes that temporary browser, waits `HAIBO_PROXY_ROTATION_WAIT_MS`, and retries the next rotation check instead of aborting immediately after the first failed browser session.
 
 ---
 

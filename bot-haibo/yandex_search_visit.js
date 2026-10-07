@@ -221,6 +221,9 @@ function formatPythonFailure(result, redactionSecrets = []) {
 
 const SOLVER_TRANSPORT_ERRORS = /ProxyError|Unable to connect to proxy|Tunnel connection failed|Node has rejected the request|ConnectTimeout|Read timed out|ConnectionError|Max retries exceeded/i;
 const SOLVER_TERMINAL_RETRY_ERRORS = /Captcha solver wall-clock timeout reached|Captcha solving timed out|ERROR_CAPTCHA_UNSOLVABLE/i;
+const QUERIES_PER_PROXY_SESSION = Number(process.env.HAIBO_QUERIES_PER_PROXY_SESSION || 4);
+const PROXY_ROTATION_CHECK_ATTEMPTS = Number(process.env.HAIBO_PROXY_ROTATION_CHECK_ATTEMPTS || 12);
+const PROXY_ROTATION_WAIT_MS = Number(process.env.HAIBO_PROXY_ROTATION_WAIT_MS || 30000);
 
 async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   console.log('  🧩 Solving captcha via Python/CapMonster...');
@@ -1378,24 +1381,8 @@ async function warmUpProfile(browser, proxyAuth, device, profileDir) {
   }
 }
 
-async function main() {
-  const { projectName, targetDomain, device, queries } = resolveCli();
-  const proxyAuth = getPrimaryProxy();
-
-  console.log('=== Yandex Search & Visit Bot ===');
-  console.log('Project:', projectName);
-  console.log('Target:', targetDomain);
-  console.log(`Device: ${device}`);
-  console.log(`Queries (${queries.length}):`, queries.join(' | '));
-  console.log(`Proxy: ${proxyAuth.host}:${proxyAuth.port}`);
-  console.log('');
-
-  // Persistent per-project profile: cookies, localStorage and history
-  // survive between runs — the bot appears as a returning user.
-  const profileDir = path.join(__dirname, '.profiles', projectName);
-  fs.mkdirSync(profileDir, { recursive: true });
-
-  const browser = await puppeteer.launch({
+async function launchBrowserSession(profileDir, proxyAuth) {
+  return await puppeteer.launch({
     headless: 'new',
     userDataDir: profileDir,
     args: [
@@ -1413,13 +1400,27 @@ async function main() {
     ],
     ignoreDefaultArgs: ['--enable-automation']
   });
+}
+
+function normalizeProxyIp(ipText) {
+  const text = String(ipText || '').trim();
+  if (!text) return '';
 
   try {
-    // Test proxy first
-    console.log('--- Testing proxy connectivity ---');
-    const testPage = await browser.newPage();
-    await authenticateIfNeeded(testPage, proxyAuth);
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.ip) return String(parsed.ip).trim();
+  } catch {}
 
+  return text.replace(/^"|"$/g, '');
+}
+
+async function testProxyIp(browser, proxyAuth, device = 'desktop') {
+  console.log('--- Testing proxy connectivity ---');
+  const testPage = await browser.newPage();
+  await humanizePage(testPage, device);
+  await authenticateIfNeeded(testPage, proxyAuth);
+
+  try {
     // Mobile proxies occasionally drop the CONNECT tunnel during IP
     // rotation — retry before giving up.
     let ipText = null;
@@ -1439,43 +1440,145 @@ async function main() {
     if (!ipText) {
       throw new Error('Proxy unreachable after 3 attempts — check geonix account or wait for IP rotation');
     }
-    console.log('Proxy IP:', ipText.trim());
-    await testPage.close();
+
+    const ip = normalizeProxyIp(ipText);
+    console.log('Proxy IP:', ip);
     console.log('');
+    return ip;
+  } finally {
+    await testPage.close().catch(() => {});
+  }
+}
 
-    // Warm up the persistent profile on first run (cookies/history)
-    await warmUpProfile(browser, proxyAuth, device, profileDir);
+async function openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber) {
+  const shouldWaitForRotation = Boolean(previousIp);
+  const maxAttempts = Number.isFinite(PROXY_ROTATION_CHECK_ATTEMPTS) && PROXY_ROTATION_CHECK_ATTEMPTS > 0
+    ? Math.floor(PROXY_ROTATION_CHECK_ATTEMPTS)
+    : 12;
+  const waitMs = Number.isFinite(PROXY_ROTATION_WAIT_MS) && PROXY_ROTATION_WAIT_MS >= 1000
+    ? PROXY_ROTATION_WAIT_MS
+    : 30000;
 
-    const results = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const browser = await launchBrowserSession(profileDir, proxyAuth);
+    let currentIp = null;
 
-    for (let i = 0; i < queries.length; i++) {
-      const query = queries[i];
-      console.log(`\n========== QUERY ${i + 1}/${queries.length}: ${query} ==========`);
+    try {
+      currentIp = await testProxyIp(browser, proxyAuth, device);
+    } catch (e) {
+      await browser.close().catch(() => {});
+      console.log(`--- Proxy check failed while waiting for rotation before session ${sessionNumber}: ${e.message}`);
+      if (attempt < maxAttempts) {
+        console.log(`--- Waiting ${Math.round(waitMs / 1000)}s before retrying proxy session ${sessionNumber} (${attempt}/${maxAttempts}) ---`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw e;
+    }
 
-      let ok = false;
-      try {
-        ok = await runSearchAndVisit(browser, proxyAuth, query, targetDomain, device);
-      } catch (e) {
-        console.log(`Query failed: ${e.message}`);
+    if (!shouldWaitForRotation || currentIp !== previousIp) {
+      if (shouldWaitForRotation) {
+        console.log(`--- Proxy IP changed: ${previousIp} -> ${currentIp} ---`);
+      }
+      return { browser, ip: currentIp };
+    }
+
+    console.log(`--- Proxy IP still ${currentIp}; waiting for rotation before session ${sessionNumber} (${attempt}/${maxAttempts}) ---`);
+    await browser.close().catch(() => {});
+
+    if (attempt < maxAttempts) {
+      await sleep(waitMs);
+    }
+  }
+
+  console.log(`--- Proxy IP did not change after ${maxAttempts} checks; continuing anyway ---`);
+  const browser = await launchBrowserSession(profileDir, proxyAuth);
+  try {
+    const ip = await testProxyIp(browser, proxyAuth, device);
+    return { browser, ip };
+  } catch (e) {
+    await browser.close().catch(() => {});
+    throw e;
+  }
+}
+
+async function main() {
+  const { projectName, targetDomain, device, queries } = resolveCli();
+  const proxyAuth = getPrimaryProxy();
+  const queriesPerSession = Number.isFinite(QUERIES_PER_PROXY_SESSION) && QUERIES_PER_PROXY_SESSION > 0
+    ? Math.floor(QUERIES_PER_PROXY_SESSION)
+    : 4;
+
+  console.log('=== Yandex Search & Visit Bot ===');
+  console.log('Project:', projectName);
+  console.log('Target:', targetDomain);
+  console.log(`Device: ${device}`);
+  console.log(`Queries (${queries.length}):`, queries.join(' | '));
+  console.log(`Proxy: ${proxyAuth.host}:${proxyAuth.port}`);
+  console.log(`Proxy rotation: ${queriesPerSession} queries per browser session`);
+  console.log('');
+
+  // Persistent per-project profile: cookies, localStorage and history
+  // survive between runs — the bot appears as a returning user.
+  const profileDir = path.join(__dirname, '.profiles', projectName);
+  fs.mkdirSync(profileDir, { recursive: true });
+
+  const results = [];
+  let previousIp = null;
+  let sessionNumber = 0;
+  let browser = null;
+
+  try {
+    for (let batchStart = 0; batchStart < queries.length; batchStart += queriesPerSession) {
+      sessionNumber++;
+      const batchEnd = Math.min(batchStart + queriesPerSession, queries.length);
+      console.log(`\n========== PROXY SESSION ${sessionNumber}: queries ${batchStart + 1}-${batchEnd}/${queries.length} ==========`);
+
+      const session = await openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber);
+      browser = session.browser;
+      previousIp = session.ip;
+
+      // Warm up the persistent profile on first run only (cookies/history).
+      await warmUpProfile(browser, proxyAuth, device, profileDir);
+
+      for (let i = batchStart; i < batchEnd; i++) {
+        const query = queries[i];
+        console.log(`\n========== QUERY ${i + 1}/${queries.length}: ${query} ==========`);
+
+        let ok = false;
+        try {
+          ok = await runSearchAndVisit(browser, proxyAuth, query, targetDomain, device);
+        } catch (e) {
+          console.log(`Query failed: ${e.message}`);
+        }
+
+        results.push({ query, ok, ip: previousIp });
+
+        if (i < batchEnd - 1) {
+          const pause = rand(45000, 90000);
+          console.log(`\n--- Pausing ${Math.round(pause / 1000)}s before next query ---`);
+          await sleep(pause);
+        }
       }
 
-      results.push({ query, ok });
+      console.log(`--- Closing browser for proxy session ${sessionNumber} ---`);
+      await browser.close();
+      browser = null;
 
-      if (i < queries.length - 1) {
-        const pause = rand(45000, 90000);
-        console.log(`\n--- Pausing ${Math.round(pause / 1000)}s before next query ---`);
-        await sleep(pause);
+      if (batchEnd < queries.length) {
+        console.log(`--- Completed ${batchEnd}/${queries.length} queries; next browser session will wait for proxy IP rotation ---`);
       }
     }
 
     console.log('\n=== SUMMARY ===');
     for (const r of results) {
-      console.log(`${r.ok ? 'OK  ' : 'FAIL'} | ${r.query}`);
+      console.log(`${r.ok ? 'OK  ' : 'FAIL'} | ${r.ip || 'unknown-ip'} | ${r.query}`);
     }
-
   } finally {
-    console.log('--- Closing browser ---');
-    await browser.close();
+    if (browser) {
+      console.log('--- Closing browser ---');
+      await browser.close().catch(() => {});
+    }
     console.log('Done.');
   }
 }
