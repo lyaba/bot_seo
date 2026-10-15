@@ -4,6 +4,8 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const proxies = require('./proxies');
+const { searchViaForm } = require('./search-input');
+const { matchesTarget, failedVisit, arrivalResult, followSearchLink, formatVisitSummary } = require('./visit-result');
 
 puppeteer.use(StealthPlugin());
 
@@ -19,6 +21,93 @@ function safeFilePart(value) {
   return String(value || 'unknown').replace(/[^a-z0-9а-яё._-]+/giu, '_').replace(/^_+|_+$/g, '');
 }
 
+// ─── SmartCaptcha image capture (ImageToTextTask input) ──
+
+// The real SmartCaptcha challenge image is a narrow strip of glyphs (~a few
+// KB). The old code screenshotted the whole widget/page (~500KB), so the OCR
+// solver received a full-page screenshot instead of the glyph strip and
+// returned garbage. Strategy: read the captcha <img> src directly, and only
+// screenshot captcha-class elements that are small enough to BE the challenge.
+const CAPTCHA_IMAGE_SELECTORS = [
+  '.CheckboxCaptcha-Image',
+  '.CheckboxCaptcha-Button img',
+  '.CheckboxCaptcha img',
+  '[class*="Captcha"] img',
+  '[class*="captcha"] img',
+  '[class*="Captcha"] canvas',
+  '[class*="captcha"] canvas',
+];
+
+// A captcha glyph strip is tiny; anything bigger than this is the page/widget,
+// not the challenge image.
+const MAX_CAPTCHA_IMAGE_BYTES = 60 * 1024;
+
+// Find the challenge image element by src, preferring real captcha endpoints.
+async function getCaptchaImageBase64(page) {
+  // Stage 1: read <img src> of captcha-class elements directly (data URI or URL).
+  try {
+    const src = await page.evaluate((sels) => {
+      for (const sel of sels) {
+        for (const el of document.querySelectorAll(sel)) {
+          const tag = el.tagName;
+          if (tag === 'IMG') {
+            const s = el.currentSrc || el.src || '';
+            if (s.startsWith('data:image')) return s;
+          } else if (tag === 'CANVAS') {
+            try { return el.toDataURL('image/png'); } catch (e) { /* tainted canvas */ }
+          }
+        }
+      }
+      return null;
+    }, CAPTCHA_IMAGE_SELECTORS);
+    if (src && src.startsWith('data:image')) {
+      const b64 = src.split(',')[1] || '';
+      console.log(`  🖼️ Captcha image read from element src (${b64.length} chars base64)`);
+      return b64;
+    }
+  } catch (e) {
+    console.log(`  ⚠️ Captcha src read failed: ${e.message}`);
+  }
+
+  // Stage 2: screenshot a captcha-class element, but only if its bounding box
+  // is glyph-strip sized. This avoids the old 500KB full-widget screenshots.
+  for (const sel of CAPTCHA_IMAGE_SELECTORS) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      const box = await el.boundingBox().catch(() => null);
+      if (!box || box.width < 10 || box.height < 10) continue;
+      if (box.width * box.height > 400 * 200) {
+        console.log(`  ↷ Skipping oversized captcha element "${sel}" (${Math.round(box.width)}x${Math.round(box.height)}) — not a glyph strip`);
+        continue;
+      }
+      const buf = await el.screenshot({ type: 'png' });
+      if (buf.length > MAX_CAPTCHA_IMAGE_BYTES) {
+        console.log(`  ↷ Skipping "${sel}" screenshot (${buf.length} bytes > ${MAX_CAPTCHA_IMAGE_BYTES} limit)`);
+        continue;
+      }
+      console.log(`  🖼️ Captcha image captured from "${sel}" (${buf.length} bytes)`);
+      return buf.toString('base64');
+    } catch (e) {
+      console.log(`  ⚠️ Captcha element screenshot failed for "${sel}": ${e.message}`);
+    }
+  }
+
+  // Stage 3: viewport fallback, size-checked. NEVER fullPage.
+  try {
+    const buf = await page.screenshot({ type: 'png' });
+    if (buf.length <= MAX_CAPTCHA_IMAGE_BYTES * 4) {
+      console.log(`  🖼️ Captcha image captured from viewport (${buf.length} bytes)`);
+      return buf.toString('base64');
+    }
+    console.log(`  ⚠️ Viewport screenshot too large for OCR (${buf.length} bytes) — skipping image task`);
+    return null;
+  } catch (e) {
+    console.log(`  ⚠️ Captcha viewport screenshot failed: ${e.message}`);
+    return null;
+  }
+}
+
 async function saveCaptchaScreenshot(page, label = 'captcha') {
   try {
     const dir = path.join(__dirname, '.captcha-screenshots');
@@ -31,6 +120,37 @@ async function saveCaptchaScreenshot(page, label = 'captcha') {
     return screenshotPath;
   } catch (e) {
     console.log(`  ⚠️ Failed to save captcha screenshot: ${e.message}`);
+    return null;
+  }
+}
+
+// Dump the captcha DOM (forms, inputs, buttons) so the token-targeting
+// selectors can be fixed against the real page, not guesses.
+async function dumpCaptchaDom(page, label = 'captcha') {
+  try {
+    const dir = path.join(__dirname, '.captcha-screenshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const htmlPath = path.join(dir, `${stamp}_${safeFilePart(label)}_dom.html`);
+    const info = await page.evaluate(() => {
+      const lines = [`URL: ${location.href}`, ''];
+      for (const f of document.querySelectorAll('form')) {
+        lines.push(`FORM action="${f.getAttribute('action') || ''}" method="${f.method}" id="${f.id}" class="${f.className}"`);
+        for (const el of f.querySelectorAll('input, textarea, select, button')) {
+          lines.push(`  <${el.tagName.toLowerCase()}> type=${el.type || ''} name="${el.name || ''}" id="${el.id}" class="${el.className}" value="${(el.value || '').slice(0, 40)}"`);
+        }
+      }
+      for (const el of document.querySelectorAll('input, textarea')) {
+        if (el.closest('form')) continue;
+        lines.push(`ORPHAN <${el.tagName.toLowerCase()}> type=${el.type || ''} name="${el.name || ''}" id="${el.id}" class="${el.className}"`);
+      }
+      return lines.join('\n');
+    });
+    fs.writeFileSync(htmlPath, `<!-- ${new Date().toISOString()} -->\n${info}\n\n${await page.content()}`, 'utf8');
+    console.log(`  🧬 Captcha DOM dump saved: ${htmlPath}`);
+    return htmlPath;
+  } catch (e) {
+    console.log(`  ⚠️ Failed to dump captcha DOM: ${e.message}`);
     return null;
   }
 }
@@ -78,38 +198,52 @@ function pickViewport(device) {
   return { ...vp, deviceScaleFactor: Math.random() < 0.25 ? 2 : 1 };
 }
 
+// ─── Manual anti-detect patches ──────────────────────────
+// puppeteer-extra-plugin-stealth covers most leaks, but SmartCaptcha still
+// fingerprints a few primitive properties. These are applied on top of the
+// plugin; they only mask automation tells, they do not change site behaviour.
+function buildStealthInitScript() {
+  return () => {
+    try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch {}
+    try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 }); } catch {}
+    try { Object.defineProperty(navigator, 'maxTouchPoints', { get: () => (navigator.maxTouchPoints || 0) }); } catch {}
+    try { Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] }); } catch {}
+    try {
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, 'mimeTypes', { get: () => [1, 2] });
+    } catch {}
+    try { window.chrome = window.chrome || { runtime: {} }; } catch {}
+    try {
+      const origQuery = (window.navigator && navigator.permissions && navigator.permissions.query)
+        ? navigator.permissions.query.bind(navigator.permissions) : null;
+      if (origQuery) {
+        navigator.permissions.query = (p) => (p && p.name === 'notifications')
+          ? Promise.resolve({ state: Notification.permission })
+          : origQuery(p);
+      }
+    } catch {}
+    try {
+      const getParameter = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function (p) {
+        if (p === 37445) return 'Intel Inc.';
+        if (p === 37446) return 'Intel Iris OpenGL Engine';
+        return getParameter.call(this, p);
+      };
+    } catch {}
+  };
+}
+
 /**
  * Apply per-session human traits: realistic viewport, matching User-Agent,
- * Moscow timezone (matches the ru locale and RU proxy IP).
+ * Moscow timezone (matches the ru locale and RU proxy IP), and the manual
+ * anti-detect patches on top of the stealth plugin.
  */
 async function humanizePage(page, device = 'desktop') {
   await page.setViewport(pickViewport(device));
   const pool = device === 'mobile' ? MOBILE_UAS : DESKTOP_UAS;
   await page.setUserAgent(pool[Math.floor(Math.random() * pool.length)]);
   try { await page.emulateTimezone('Europe/Moscow'); } catch {}
-}
-
-/**
- * Type like a human: variable key delay, occasional typo + backspace
- * correction, random thinking pauses between words/chars.
- */
-async function humanType(page, text) {
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-
-    // ~7% chance: hit a neighbouring wrong char, notice, correct it
-    if (Math.random() < 0.07 && /[а-яёa-z]/i.test(ch)) {
-      const shift = Math.random() < 0.5 ? 1 : -1;
-      const wrong = String.fromCharCode(ch.charCodeAt(0) + shift);
-      await page.keyboard.type(wrong, { delay: rand(60, 160) });
-      await sleep(rand(180, 450));   // "notice the mistake"
-      await page.keyboard.press('Backspace');
-      await sleep(rand(120, 320));
-    }
-
-    await page.keyboard.type(ch, { delay: rand(60, 190) });
-    if (Math.random() < 0.12) await sleep(rand(200, 650)); // thinking pause
-  }
+  try { await page.evaluateOnNewDocument(buildStealthInitScript()); } catch {}
 }
 
 // ─── Captcha Solver Integration ──────────────────────────
@@ -224,21 +358,33 @@ const SOLVER_TERMINAL_RETRY_ERRORS = /Captcha solver wall-clock timeout reached|
 const QUERIES_PER_PROXY_SESSION = Number(process.env.HAIBO_QUERIES_PER_PROXY_SESSION || 4);
 const PROXY_ROTATION_CHECK_ATTEMPTS = Number(process.env.HAIBO_PROXY_ROTATION_CHECK_ATTEMPTS || 12);
 const PROXY_ROTATION_WAIT_MS = Number(process.env.HAIBO_PROXY_ROTATION_WAIT_MS || 30000);
+const PROXY_IP_CHECK_ATTEMPTS = Number(process.env.HAIBO_PROXY_IP_CHECK_ATTEMPTS || 3);
+const PROXY_IP_CHECK_TIMEOUT_MS = Number(process.env.HAIBO_PROXY_IP_CHECK_TIMEOUT_MS || 20000);
+const PROXY_IP_CHECK_RETRY_WAIT_MS = Number(process.env.HAIBO_PROXY_IP_CHECK_RETRY_WAIT_MS || 8000);
+const PROXY_SESSION_START_MAX_MS = Number(process.env.HAIBO_PROXY_SESSION_START_MAX_MS || 180000);
+const BROWSER_LAUNCH_TIMEOUT_MS = Number(process.env.HAIBO_BROWSER_LAUNCH_TIMEOUT_MS || 45000);
+const PROXY_SESSION_RETRY_WAIT_MS = Number(process.env.HAIBO_PROXY_SESSION_RETRY_WAIT_MS || 300000);
 
-async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
+async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3, imageB64 = null) {
   console.log('  🧩 Solving captcha via Python/CapMonster...');
   
   const captchaUrl = captchaPage.url();
   console.log(`  Captcha URL: ${captchaUrl}`);
   
-  // Get the sitekey from the page
+  // The sitekey only matters for the Turnstile checkbox fallback. When we
+  // have the captcha image, the solver runs ImageToTextTask and ignores it.
   let sitekey;
-  try {
-    sitekey = await getCaptchaSiteKey(captchaPage);
-  } catch (e) {
-    sitekey = '0x4AAAAAAA1Y6Rq8M2BnJfIe';
+  if (imageB64) {
+    sitekey = '';
+    console.log(`  🖼️ Image captcha: ${imageB64.length} chars base64 → ImageToTextTask (no sitekey)`);
+  } else {
+    try {
+      sitekey = await getCaptchaSiteKey(captchaPage);
+    } catch (e) {
+      sitekey = '0x4AAAAAAA1Y6Rq8M2BnJfIe';
+    }
+    console.log(`  Sitekey: ${sitekey.substring(0, 30)}...`);
   }
-  console.log(`  Sitekey: ${sitekey.substring(0, 30)}...`);
   
   // Build proxy args for Python script using proxyAuth directly
   let proxyArg = null;
@@ -285,7 +431,18 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(`  Attempt ${attempt}/${maxRetries}...`);
     
-    const args = ['-u', '-X', 'faulthandler', scriptPath, '--url', captchaUrl, '--sitekey', sitekey, '--output', 'json'];
+    const args = ['-u', '-X', 'faulthandler', scriptPath, '--url', captchaUrl, '--output', 'json'];
+    if (imageB64) {
+      // Pass the captcha image via a temp file (never argv): the solver
+      // base64-encodes it and submits it as the ImageToTextTask body.
+      const imgDir = path.join(__dirname, '.captcha-screenshots');
+      fs.mkdirSync(imgDir, { recursive: true });
+      const imgFile = path.join(imgDir, `${Date.now()}_solver_${process.pid}_${attempt}.png`);
+      fs.writeFileSync(imgFile, Buffer.from(imageB64, 'base64'));
+      args.push('--captcha-image-file', imgFile);
+    } else {
+      args.push('--sitekey', sitekey);
+    }
     if (proxyArg) {
       args.push('--proxy', proxyArg);
     }
@@ -410,11 +567,33 @@ async function getCaptchaSiteKey(page) {
   });
 }
 
+// Extract the retpath redirect target from a captcha URL (showcaptcha /
+// showcaptchafast). The retpath query param is base64 of the target URL.
+function getCaptchaRetpath(pageUrl) {
+  try {
+    const u = new URL(pageUrl);
+    const rp = u.searchParams.get('retpath');
+    if (!rp) return null;
+    let decoded = Buffer.from(rp, 'base64').toString('utf8');
+    // retpath may itself be URL-encoded; decode once more if it looks encoded
+    if (/%25|%\w\w/.test(decoded)) {
+      try { decoded = decodeURIComponent(decoded); } catch (e) { /* keep as-is */ }
+    }
+    return decoded || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function applyCaptchaToken(page, token) {
   console.log('  🔑 Applying captcha token to page...');
   
   const result = await page.evaluate((tok) => {
+    // SmartCaptcha answer field FIRST: Yandex CheckboxCaptcha input is the
+    // real target for the OCR text. Generic token fields come after.
     const selectors = [
+      '.CheckboxCaptcha-Input',
+      'input.CheckboxCaptcha-Input',
       'textarea[name="g-recaptcha-response"]',
       'input[name="g-recaptcha-response"]',
       'textarea[name="h-captcha-response"]',
@@ -435,7 +614,7 @@ async function applyCaptchaToken(page, token) {
       'textarea[name*="captcha" i]',
       'textarea[name*="response" i]',
     ];
-    
+
     const appliedFields = [];
     const seen = new Set();
     const tokenFieldPattern = /(captcha|recaptcha|hcaptcha|turnstile|smart-token|response|token)/i;
@@ -562,11 +741,119 @@ async function authenticateIfNeeded(page, proxyAuth) {
 
 // ─── Enhanced search with captcha solving ────────────────
 
+// Solve the captcha: checkbox click first (clean path, no image); then the
+// LOCAL pow solver (no external captcha service — CapMonster is unreliable for
+// Yandex SmartCaptcha); only if the page is a REAL image challenge fall back
+// to the Python solver (ImageToTextTask). showcaptchafast (passive check) is
+// handled by following retpath.
+async function solveCaptcha(page, proxyAuth, device = 'desktop', label = 'captcha') {
+  if (await tryClickCaptchaCheckbox(page, device)) return true;
+
+  if (page.url().includes('showcaptchafast')) {
+    const retpath = getCaptchaRetpath(page.url());
+    if (retpath) {
+      console.log(`  ↷ showcaptchafast — following retpath instead of OCR: ${retpath.substring(0, 100)}`);
+      try {
+        await gotoWithRetry(page, retpath, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await sleep(rand(2000, 4000));
+        if (!isCaptchaPage(page.url())) {
+          console.log('  ✓ retpath redirect passed captcha wall!');
+          return true;
+        }
+        console.log('  ✗ retpath redirect still on captcha page');
+      } catch (e) {
+        console.log(`  ⚠️ retpath redirect failed: ${e.message}`);
+      }
+    }
+  }
+
+  // Gate: only run OCR when there is a REAL image challenge. SmartCaptcha is a
+  // pow/checkbox challenge (fields rdata/pdata/tdata/picasso, empty imageSrc) —
+  // feeding its canvas noise to OCR yields a garbage 5-char token that Yandex
+  // rejects, so it is strictly worse than just clicking the checkbox again.
+  const hasImageChallenge = await page.evaluate(() => {
+    // PRIMARY signal: the pow/checkbox variant ships its challenge data as
+    // hidden form inputs (rdata/pdata/picasso/tdata) inside #checkbox-captcha-
+    // form. If ANY of those exist in the DOM, this is a pow challenge — the
+    // visible <img>/canvas is decorative noise, and OCR on it only produced
+    // garbage 4-5 char tokens that Yandex rejected.
+    try {
+      if (document.getElementById('checkbox-captcha-form')) return false;
+      const powNames = /^(rdata|pdata|picasso|tdata)$/i;
+      for (const el of document.querySelectorAll('input')) {
+        const n = (el.getAttribute('name') || '').trim();
+        const id = (el.getAttribute('id') || '').trim();
+        if (powNames.test(n) || powNames.test(id)) return false;
+      }
+    } catch (e) { /* fall through to secondary signals */ }
+    // SECONDARY: __SSR_DATA__ is a JS object literal (NOT strict JSON) — cannot
+    // be JSON.parse'd. Inspect its raw source instead: an EMPTY imageSrc ("")
+    // means the checkbox/pow variant; a non-empty imageSrc means a real image
+    // challenge.
+    const raw = (function () {
+      try {
+        const s = window.__SSR_DATA__;
+        if (typeof s === 'string') return s;
+        if (s && typeof s === 'object') return JSON.stringify(s);
+        return '';
+      } catch (e) { return ''; }
+    })();
+    if (raw) {
+      const m = raw.match(/"?\b(?:imageSrc|taskImageSrc)"?\s*:\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^,}\s]+)/);
+      if (m) {
+        const v = m[1].replace(/^["']|["']$/g, '').trim();
+        if (v && v !== '""' && v !== "''" && v !== 'null' && v !== 'undefined') return true;
+      }
+    }
+    // LAST RESORT: a visible <img> pointing at a real captcha endpoint.
+    const imgs = document.querySelectorAll('img');
+    for (const el of imgs) {
+      const src = el.getAttribute('src') || '';
+      if (/showcaptcha|captcha|\/pic|challenge/i.test(src) && el.getBoundingClientRect().width > 0) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (!hasImageChallenge) {
+    // Checkbox/pow challenge with no real image: solve it LOCALLY (proof-of-work
+    // computed in our own browser session). CapMonster is unreliable for
+    // SmartCaptcha, so the Python solver is only the last resort here.
+    console.log('  ↷ Checkbox/pow captcha without image challenge (empty imageSrc) — solving pow locally (CapMonster disabled for SmartCaptcha)');
+    if (await solveCaptchaLocally(page, label)) return true;
+    console.log('  ↷ Local pow solver failed — last-resort attempt via Python solver...');
+    const token = await solveCaptchaWithPython(page, proxyAuth, 3, null);
+    if (!token) return false;
+    console.log(`  🔑 Applying captcha solution to page... (token length: ${String(token).length})`);
+    await applyCaptchaToken(page, token);
+    await sleep(rand(2000, 4000));
+    return !isCaptchaPage(page.url());
+  }
+
+  console.log('  Checkbox stage failed — solving image captcha via Python solver...');
+  const imageB64 = await getCaptchaImageBase64(page);
+  const token = await solveCaptchaWithPython(page, proxyAuth, 3, imageB64);
+  if (!token) return false;
+  console.log('  🔑 Applying captcha solution to page...');
+  await applyCaptchaToken(page, token);
+  await sleep(rand(2000, 4000));
+  return !isCaptchaPage(page.url());
+}
+
+// Yandex search accepts spaces, underscores and hyphens in the text param;
+// %20 encoding trips the strict captcha path, so encode space as '+'.
+function encodeQueryText(query) {
+  return encodeURIComponent(query).replace(/%20/g, '+');
+}
+
 async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
+  const text = encodeQueryText(query);
   const urls = [
-    `https://yandex.ru/search/?text=${encodeURIComponent(query)}&lr=213`,
-    `https://yandex.ru/search/?text=${encodeURIComponent(query)}&auto-direct=true`,
-    `https://search.yandex.ru/yandsearch?text=${encodeURIComponent(query)}&lr=213`,
+    `https://yandex.ru/search/?text=${text}&lr=213`,
+    `https://yandex.ru/search/?text=${text}&auto-direct=true`,
+    // yandex.ru (NOT search.yandex.ru — that host trips the captcha wall)
+    `https://yandex.ru/yandsearch?text=${text}&lr=213`,
   ];
   let lastFailure = null;
 
@@ -600,16 +887,17 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
       console.log(`  Result URL: ${pageUrl}`);
 
       if (isCaptchaPage(pageUrl)) {
-        console.log('  ⚠️ CAPTCHA triggered — attempting to solve via Python...');
-        
+        console.log('  ⚠️ CAPTCHA triggered — checkbox click first, then Python solver...');
+
         // Wait for captcha iframe to load
         await sleep(rand(3000, 5000));
         await saveCaptchaScreenshot(page, `solver_${safeFilePart(query)}`);
-        
-        // Try to solve the captcha
-        let token = null;
+        await dumpCaptchaDom(page, `solver_${safeFilePart(query)}`);
+
+        // Try to solve the captcha (checkbox click, then image solver)
+        let solved = false;
         try {
-          token = await solveCaptchaWithPython(page, proxyAuth);
+          solved = await solveCaptcha(page, proxyAuth, device, `solver_${safeFilePart(query)}`);
         } catch (e) {
           const reason = SOLVER_TERMINAL_RETRY_ERRORS.test(e.message || String(e)) ? 'solver-terminal' : 'solver';
           lastFailure = { reason, error: e.message };
@@ -620,55 +908,41 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
           }
           continue;
         }
-        
-        if (token) {
-          console.log('  🔑 Applying token...');
-          await applyCaptchaToken(page, token);
-          
-          // Check if we're past the captcha now
-          await sleep(rand(2000, 4000));
+
+        if (solved) {
           const newUrl = page.url();
-          
-          if (!isCaptchaPage(newUrl)) {
-            console.log(`  ✓ Captcha solved! Redirected to: ${newUrl}`);
-            
-            // Check for search results
-            const hasResults = await page.evaluate(() => {
-              return document.querySelector('.organic__href, .serp-item, [class*="organic"], [class*="result"]') !== null;
-            });
-            
-            if (hasResults) {
-              console.log('  ✓ Search results found after captcha!');
-              return { page, success: true };
-            }
-            
-            // Wait more for results to load
-            await sleep(rand(4000, 7000));
-            const hasResults2 = await page.evaluate(() => {
-              return document.querySelector('.organic__href, .serp-item, [class*="organic"], [class*="result"]') !== null;
-            });
-            
-            if (hasResults2) {
-              console.log('  ✓ Search results found after waiting!');
-              return { page, success: true };
-            }
-            
-            // If still no results but captcha solved, keep the page and let caller handle it
-            console.log('  ⚠️ Captcha solved but no results yet — keeping page for fallback handling');
+          console.log(`  ✓ Captcha solved! Redirected to: ${newUrl}`);
+
+          // Check for search results
+          const hasResults = await page.evaluate(() => {
+            return document.querySelector('.organic__href, .serp-item, [class*="organic"], [class*="result"]') !== null;
+          });
+
+          if (hasResults) {
+            console.log('  ✓ Search results found after captcha!');
             return { page, success: true };
-          } else {
-            lastFailure = { reason: 'captcha', error: 'Captcha token was not accepted' };
-            console.log('  ✗ Captcha token not accepted, trying next URL...');
-            await page.close();
-            continue;
           }
+
+          // Wait more for results to load
+          await sleep(rand(4000, 7000));
+          const hasResults2 = await page.evaluate(() => {
+            return document.querySelector('.organic__href, .serp-item, [class*="organic"], [class*="result"]') !== null;
+          });
+
+          if (hasResults2) {
+            console.log('  ✓ Search results found after waiting!');
+            return { page, success: true };
+          }
+
+          // If still no results but captcha solved, keep the page and let caller handle it
+          console.log('  ⚠️ Captcha solved but no results yet — keeping page for fallback handling');
+          return { page, success: true };
+        } else {
+          lastFailure = { reason: 'captcha', error: 'Captcha solution was not accepted' };
+          console.log('  ✗ Captcha solution not accepted, trying next URL...');
+          await page.close();
+          continue;
         }
-        
-        // If Python solver failed, try next URL
-        lastFailure = { reason: 'solver', error: 'Python captcha solver returned no token' };
-        console.log('  ✗ Python captcha solver failed, trying next URL...');
-        await page.close();
-        continue;
       }
 
       // Check if we have search results
@@ -741,7 +1015,7 @@ async function humanActivity(page, device = 'desktop') {
     }
     return;
   }
-  await humanActivity(page, device);
+  await humanMouse(page);
 }
 
 async function humanMouse(page) {
@@ -818,7 +1092,8 @@ async function gotoWithRetry(page, url, options = {}, attempts = 3) {
       lastErr = e;
       const msg = e && e.message ? e.message : String(e);
       if (!TRANSIENT_NET_ERRORS.test(msg)) throw e;
-      console.log(`  Nav attempt ${i}/${attempts} failed (${msg.split('\n')[0].substring(0, 90)}), retrying navigation...`);
+      const action = i < attempts ? 'retrying navigation...' : 'giving up on this navigation.';
+      console.log(`  Nav attempt ${i}/${attempts} failed (${msg.split('\n')[0].substring(0, 90)}), ${action}`);
       if (i < attempts) await sleep(rand(6000, 12000));
     }
   }
@@ -843,9 +1118,15 @@ async function tryClickCaptchaCheckbox(page, device = 'desktop') {
       return false;
     }
 
-    // Human-like: bring into view, then tap (mobile) or hover+click (desktop)
+    // The widget's own listener is attached to 'click' on #js-button (confirmed
+    // from the live page: it sets window.__JS_BUTTON_CLICKED__ and flips
+    // type->submit). A synthetic el.click() fires click WITHOUT isTrusted;
+    // page.mouse.click / touchscreen.tap produce trusted input events, which is
+    // what the widget and Yandex's bot-detection expect. Human-like: bring into
+    // view and focus first, then tap (mobile) or hover+click (desktop).
     await btn.evaluate(elem => elem.scrollIntoView({ block: 'center' })).catch(() => {});
     await sleep(rand(300, 700));
+    try { await page.bringToFront(); } catch (e) { console.log(`  bringToFront failed: ${e.message}`); }
     const box = await btn.boundingBox();
     if (device === 'mobile' && box) {
       await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
@@ -856,6 +1137,12 @@ async function tryClickCaptchaCheckbox(page, device = 'desktop') {
     } else {
       await btn.evaluate(elem => elem.click()).catch(() => {});
     }
+    // Confirmed from the live captcha_smart.*.js source in the DOM dump: the
+    // button's own click listener ONLY sets window.__JS_BUTTON_CLICKED__ and
+    // removes itself — it does NOT submit the form. The flag is an audit
+    // signal; the real answer is tdata, which we compute in solveCaptchaLocally.
+    const flagged = await page.evaluate(() => !!window.__JS_BUTTON_CLICKED__).catch(() => false);
+    console.log(`  Checkbox click: flag __JS_BUTTON_CLICKED__=${flagged} (widget click handler does not submit — pow solver follows)`);
 
     // Poll for redirect away from the captcha page
     for (let i = 0; i < 20; i++) {
@@ -872,6 +1159,209 @@ async function tryClickCaptchaCheckbox(page, device = 'desktop') {
     console.log(`  Checkbox click error: ${e.message}`);
     return false;
   }
+}
+
+/**
+ * Solve Yandex SmartCaptcha pow/checkbox challenge LOCALLY (no external
+ * captcha service). Confirmed protocol (decoded from the live captcha DOM):
+ *   - hidden form fields: rdata, pdata, tdata (EMPTY on checkbox variant),
+ *     picasso — all base64 JSON.
+ *   - pdata = {powNonce, powCalcTime, powPrefix}; powPrefix is hex and decodes
+ *     to "t=<ts>;p=<uuid>;c=<diff>;d=<hex>;" — the hash-chain prefix.
+ *   - rdata = ~100 JSON chunks "<base64>;<idx>" (keys a1..z5 + pgrd/v): the
+ *     per-chunk expected hashes the real widget's own JS verifies.
+ *   - picasso = canvas challenge tasks [{seed, rounds, width, height,
+ *     fontSizeFactor, maxShadowBlur, result, calcTime}].
+ * Strategy (in this order, inside OUR browser session over the proxy):
+ *   A. foreground the tab (page.bringToFront() — background-tab throttling is
+ *      what made the old click path silently fail), click the checkbox, and
+ *      let the page's OWN script compute the answer;
+ *   B. local protocol solver: recompute picasso hashes in-page, mine the pow
+ *      nonce, write tdata, submit the real form to formAction.
+ */
+async function solveCaptchaLocally(page, label = 'captcha') {
+  // The pow fields (rdata/pdata/tdata/picasso) are NOT top-level keys of
+  // __SSR_DATA__ — confirmed from the live captcha DOM: they live in the
+  // hidden <input> elements of #checkbox-captcha-form, and __SSR_DATA__ only
+  // carries formAction/powPrefix/powComplexity. Read the real sources: SSR for
+  // formAction/powPrefix/powComplexity, the DOM inputs for the data fields.
+  let ctx = null;
+  try {
+    ctx = await page.evaluate(() => {
+      const s = window.__SSR_DATA__;
+      const so = (s && typeof s === 'object') ? s : {};
+      const inputVal = (n) => {
+        const el = document.querySelector(`#js-${n}, input[name="${n}"], textarea[name="${n}"]`);
+        return el ? el.value : '';
+      };
+      return {
+        ssrKeys: Object.keys(so),
+        formAction: typeof so.formAction === 'string' ? so.formAction : '',
+        powPrefix: typeof so.powPrefix === 'string' ? so.powPrefix : '',
+        powComplexity: typeof so.powComplexity === 'string' ? so.powComplexity : '',
+        rdata: inputVal('rdata'), pdata: inputVal('pdata'),
+        tdata: inputVal('tdata'), picasso: inputVal('picasso'),
+      };
+    });
+  } catch (e) {
+    console.log(`  Local solver: cannot read captcha page state: ${e.message}`);
+    return false;
+  }
+  if (!ctx) return false;
+  if (!ctx.pdata || !ctx.formAction) {
+    console.log('  Local solver: no pdata/formAction on captcha page — nothing to solve');
+    return false;
+  }
+  console.log(`  Local pow solver: SSR keys=[${ctx.ssrKeys.join(', ')}]`);
+  console.log(`  Local pow solver: pdata=${String(ctx.pdata).length}ch rdata=${String(ctx.rdata || '').length}ch picasso=${String(ctx.picasso || '').length}ch tdata=${String(ctx.tdata || '').length}ch formAction=${String(ctx.formAction).substring(0, 80)}`);
+
+  // Step A: foreground the tab (defeats background-tab throttling of the
+  // captcha's own rAF-based pow loop), click the checkbox with TRUSTED input
+  // events (synthetic el.click() is untrusted and the widget ignores it), and
+  // wait for the widget to solve and redirect on its own.
+  try { await page.bringToFront(); } catch (e) { console.log(`  bringToFront failed: ${e.message}`); }
+  let clicked = false;
+  try {
+    const btn = await page.$('#js-button.CheckboxCaptcha-Button') || await page.$('.CheckboxCaptcha-Button');
+    if (btn) {
+      const bb = await btn.boundingBox().catch(() => null);
+      if (bb) {
+        await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2, { steps: rand(8, 16) });
+        await sleep(rand(200, 500));
+        await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2, { delay: rand(60, 140) });
+        clicked = true;
+      } else {
+        await btn.evaluate((el) => el.click()).catch(() => {});
+        clicked = true;
+      }
+    }
+  } catch (e) { console.log(`  Local solver step A click error: ${e.message}`); }
+  const flagged = await page.evaluate(() => !!window.__JS_BUTTON_CLICKED__).catch(() => false);
+  console.log(`  Local solver step A: checkbox clicked=${clicked} flag=${flagged} (page-side pow runs on its own)`);
+
+  if (clicked) {
+    for (let i = 0; i < 12; i++) {
+      await sleep(1000);
+      if (!isCaptchaPage(page.url())) {
+        console.log('  ✓ Local pow solve passed (page-side solver)! Redirected to:', page.url().substring(0, 100));
+        return true;
+      }
+    }
+    console.log('  Local solver step A: page-side solver did not redirect in 12s — computing tdata locally...');
+  }
+
+  // Step B: compute the answers with the verbatim-port solver (captcha_solver.js:
+  // SHA-256 PoW + LCG-Lehmer + MurmurHash3 x64-128 from the live bundle) — mine
+  // the pow nonce in Node, re-render the picasso canvas in-page — write tdata,
+  // submit the real form (rdata/pdata/picasso/tdata) to formAction.
+  const solver = require('./captcha_solver.js');
+  let solved;
+  try {
+    // ---- pdata: powPrefix (hex) + complexity from the page context.
+    const pj = JSON.parse(Buffer.from(String(ctx.pdata).replace(/\s/g, ''), 'base64').toString('utf8'));
+    const prefixHex = pj.powPrefix ? String(pj.powPrefix) : '';
+    const calcTime = Number(pj.powCalcTime) || 0;
+    const cm = /c=(\d+)/.exec(prefixHex);
+    const diff = cm ? Number(cm[1]) : (Number(ctx.powComplexity) || 0);
+
+    // ---- pow: mine a 16-byte nonce (BE Date.now() + random) such that
+    // SHA-256(decodedPrefixBytes || nonce) passes checkComplexity(diff).
+    let answer = null;
+    if (diff > 0 && prefixHex) {
+      const t0 = Date.now();
+      answer = await solver.solvePow(Buffer.from(prefixHex, 'hex'), diff);
+      console.log(`  pow nonce mined in ${Date.now() - t0}ms (diff=${diff})`);
+    }
+    if (answer == null) { solved = { ok: false, error: 'pow nonce not mined (no prefix/complexity)' }; }
+    else {
+      // ---- picasso: re-render each canvas task in-page with the ported
+      // LCG-Lehmer + MurmurHash3 x64-128 chain and check our result against
+      // the server-provided task.result.
+      const tasks = (() => { try { const v = JSON.parse(Buffer.from(String(ctx.picasso).replace(/\s/g, ''), 'base64').toString('utf8')); return Array.isArray(v) ? v : [v]; } catch (e) { return []; } })();
+      let chunkCount = 0;
+      try { chunkCount = Object.keys(JSON.parse(Buffer.from(String(ctx.rdata).replace(/\s/g, ''), 'base64').toString('utf8'))).length; } catch (e) { /* ignore */ }
+      const solverSrc = require('fs').readFileSync(require('path').join(__dirname, 'captcha_solver.js'), 'utf8');
+      const inPageSolver = '(function(){' + solverSrc.replace(/^'use strict';\s*/m, '').replace(/module\.exports\s*=\s*\{[\s\S]*?\};?\s*$/m, '') + ';return {Lcg:typeof Lcg!=="undefined"?Lcg:null,murmur128x64:typeof murmur128x64!=="undefined"?murmur128x64:null,solvePicassoTask:typeof solvePicassoTask!=="undefined"?solvePicassoTask:null};})()';
+      let picassoOk = 0;
+      for (const t of tasks) {
+        if (!t || t.seed === undefined) continue;
+        try {
+          const res = await page.evaluate((src, task) => {
+            const m = eval(src);
+            const canvas = document.createElement('canvas');
+            canvas.width = task.width; canvas.height = task.height;
+            // The reference bundle (o9) appends the canvas to documentElement
+            // before toDataURL() — keep the environment byte-identical.
+            document.documentElement.appendChild(canvas);
+            let out;
+            try { out = m.solvePicassoTask(task, canvas); } finally { canvas.remove(); }
+            return { result: out.result, expected: task.result, match: out.result === task.result };
+          }, inPageSolver, t).catch((e) => ({ error: String((e && e.message) || e) }));
+          if (res && res.match) picassoOk++;
+          console.log(`  picasso seed=${t.seed} rounds=${t.rounds} portMatch=${res && res.match} got=${res && res.result ? String(res.result).slice(0, 16) + '…' : 'err:' + (res && res.error)}`);
+        } catch (e) { console.log(`  picasso task error: ${e.message}`); }
+      }
+
+      const tdataVal = solver.buildTdata(answer, calcTime, prefixHex);
+      const form = await page.evaluate((b64) => {
+        const el = document.querySelector('#js-tdata, input[name="tdata"], textarea[name="tdata"]');
+        const form = document.getElementById('checkbox-captcha-form') ||
+          document.querySelector('form[action*="checkcaptcha" i]') || document.querySelector('form');
+        if (!form) return { ok: false, error: 'captcha form not found' };
+        function setVal(el, v) {
+          const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+          const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (desc && desc.set) desc.set.call(el, v); else el.value = v;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const inputs = Array.from(form.querySelectorAll('input, textarea'));
+        const filled = [];
+        const tdataEl = inputs.find((e) => /tdata/i.test((e.name || '') + ' ' + (e.id || '')));
+        if (tdataEl) { setVal(tdataEl, b64); filled.push(tdataEl.name || 'tdata'); }
+        else {
+          const cand = inputs.find((e) => e.type === 'hidden' && !/(rdata|pdata|picasso|csrf|xsrf|action)/i.test(e.name || e.id || ''));
+          if (cand) { setVal(cand, b64); filled.push(cand.name || cand.id || 'hidden'); }
+        }
+        return { ok: true, filled: filled.join(',') };
+      }, tdataVal);
+      solved = form.ok
+        ? { ok: true, answer, diff, filled: form.filled, chunkCount, picassoOk, picassoTotal: tasks.length }
+        : { ok: false, error: form.error };
+    }
+  } catch (e) {
+    solved = { ok: false, error: String((e && e.message) || e) };
+  }
+
+  if (!solved.ok) {
+    console.log(`  ✗ Local pow solver failed: ${solved.error}`);
+    return false;
+  }
+  console.log(`  ✓ pow nonce found: ${solved.answer} (diff=${solved.diff}, rdata chunks=${solved.chunkCount}, fields: ${solved.filled}) — submitting form...`);
+
+  const submitted = await page.evaluate(() => {
+    const form = document.querySelector('#js-form.checkbox-captcha-form') ||
+      document.querySelector('form.checkbox-captcha-form') ||
+      document.querySelector('form[action*="checkcaptcha" i]') ||
+      document.querySelector('form');
+    if (!form) return false;
+    const btn = Array.from(form.querySelectorAll('button, input[type="submit"]'))
+      .find((b) => b.type === 'submit' || /проверить|провер|submit|continue|отправ/i.test(b.textContent || b.value || ''));
+    if (btn) { btn.click(); return true; }
+    if (typeof form.requestSubmit === 'function') form.requestSubmit(); else form.submit();
+    return true;
+  });
+  console.log(`  Submit triggered: ${submitted ? 'yes' : 'no'}`);
+
+  for (let i = 0; i < 15; i++) {
+    await sleep(1000);
+    if (!isCaptchaPage(page.url())) {
+      console.log('  ✓ Local pow solve passed! Redirected to:', page.url().substring(0, 100));
+      return true;
+    }
+  }
+  console.log('  ✗ Local pow solve submitted but page stayed on captcha');
+  return false;
 }
 
 // ─── Projects registry ───────────────────────────────────
@@ -930,6 +1420,11 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
   let mainPage = null;
   let resultPage = null;
 
+  // Read the warm-up captcha signal for THIS query, then reset it so it never
+  // leaks into the next query on the same browser session.
+  const warmedIntoCaptcha = runSearchAndVisit._warmHitCaptcha === true;
+  runSearchAndVisit._warmHitCaptcha = false;
+
   try {
     // Open ya.ru first (human behavior)
     console.log('--- Opening ya.ru ---');
@@ -937,44 +1432,32 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     await humanizePage(mainPage, device);
     await authenticateIfNeeded(mainPage, proxyAuth);
 
-    await gotoWithRetry(mainPage, 'https://ya.ru/', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
-    await sleep(rand(3000, 5000));
-    await humanActivity(mainPage, device);
+    // If the warm-up already hit a captcha on this IP, the exit IP is dirty —
+    // go straight to the direct SERP URL instead of wasting attempts on the
+    // ya.ru homepage (which itself can be a captcha wall).
 
-    // Try to find and use the search input on ya.ru
-    console.log('--- Using ya.ru search ---');
-    const selectors = [
-      'input[name="text"]',
-      'textarea[class*="Search"]',
-      '[class*="SearchInput"] input',
-      '.index-Controls input',
-      'input[type="text"][autofocus]',
-      '.header-search__field',
-      '#text'
-    ];
+    if (!warmedIntoCaptcha) {
+      console.log('--- Opening ya.ru ---');
+      await gotoWithRetry(mainPage, 'https://ya.ru/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+      await sleep(rand(3000, 5000));
+      await humanActivity(mainPage, device);
 
-    let searchFound = false;
-    for (const sel of selectors) {
-      const el = await mainPage.$(sel);
-      if (el) {
-        console.log(`  Found input via: ${sel}`);
-        await el.click({ clickCount: 3 });
-        await sleep(rand(200, 500));
-        await humanType(mainPage, searchQuery);
-        await sleep(rand(500, 1000));
-        await mainPage.keyboard.press('Enter');
-        searchFound = true;
-        break;
+      // Try to find and use the search input on ya.ru
+      console.log('--- Using ya.ru search ---');
+      const searchFound = await searchViaForm(mainPage, searchQuery, device);
+
+      if (!searchFound) {
+        console.log('  Search form could not complete the query; using direct search URL...');
+        // Direct Yandex search URL — the most reliable method
+        const directUrl = `https://yandex.ru/search/?text=${encodeQueryText(searchQuery)}&lr=213`;
+        await gotoWithRetry(mainPage, directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
       }
-    }
-
-    if (!searchFound) {
-      console.log('  Search input not found on ya.ru, navigating directly...');
-      // Direct Yandex search URL — the most reliable method
-      const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
+    } else {
+      console.log('  Warm-up hit captcha — going straight to direct SERP URL...');
+      const directUrl = `https://yandex.ru/search/?text=${encodeQueryText(searchQuery)}&lr=213`;
       await gotoWithRetry(mainPage, directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     }
 
@@ -986,7 +1469,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     if (isCaptchaPage(currentPageUrl)) {
       console.log('CAPTCHA detected! Trying checkbox click first...');
       await saveCaptchaScreenshot(mainPage, `${targetDomain}_initial`);
-      if (await tryClickCaptchaCheckbox(mainPage, device)) {
+      if (await solveCaptcha(mainPage, proxyAuth, device, `${targetDomain}_initial`)) {
         activePage = mainPage;
       } else {
         console.log('Falling back to direct search URLs + solver...');
@@ -996,7 +1479,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
         const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
         if (!result.success) {
           console.log(formatSearchFailure(result));
-          return false;
+          return failedVisit(result.reason || 'search-failed');
         }
         resultPage = result.page;
         activePage = resultPage;
@@ -1011,7 +1494,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       if (isCaptchaPage(newUrl)) {
         console.log('CAPTCHA detected after search! Trying checkbox click first...');
         await saveCaptchaScreenshot(mainPage, `${targetDomain}_after_search`);
-        if (await tryClickCaptchaCheckbox(mainPage, device)) {
+        if (await solveCaptcha(mainPage, proxyAuth, device, `${targetDomain}_after_search`)) {
           activePage = mainPage;
         } else {
           console.log('Falling back to direct URLs + solver...');
@@ -1021,7 +1504,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
           if (!result.success) {
             console.log(formatSearchFailure(result));
-            return false;
+            return failedVisit(result.reason || 'search-failed');
           }
           resultPage = result.page;
           activePage = resultPage;
@@ -1038,7 +1521,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
 
         if (!hasResults) {
           console.log('No results on current page, trying direct search...');
-          const directUrl = `https://yandex.ru/search/?text=${encodeURIComponent(searchQuery)}&lr=213`;
+          const directUrl = `https://yandex.ru/search/?text=${encodeQueryText(searchQuery)}&lr=213`;
           await gotoWithRetry(mainPage, directUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 45000
@@ -1049,14 +1532,14 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
           if (isCaptchaPage(checkUrl)) {
             console.log('CAPTCHA detected! Trying checkbox click first...');
             await saveCaptchaScreenshot(mainPage, `${targetDomain}_direct_search`);
-            if (await tryClickCaptchaCheckbox(mainPage, device)) {
+            if (await solveCaptcha(mainPage, proxyAuth, device, `${targetDomain}_direct_search`)) {
               activePage = mainPage;
             } else {
               console.log('Falling back to alternative URLs + solver...');
               const result = await trySearchViaURL(searchQuery, browser, proxyAuth, device);
               if (!result.success) {
                 console.log(formatSearchFailure(result));
-                return false;
+                return failedVisit(result.reason || 'search-failed');
               }
               resultPage = result.page;
               activePage = resultPage;
@@ -1072,9 +1555,9 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     // Scan result pages 1..MAX_PAGES until the target domain is found.
     // Human-like: pause + scroll between pages, captcha check on each page.
     const MAX_PAGES = 7;
-    let visited = false;
+    let visitResult = null;
 
-    for (let pageNum = 1; pageNum <= MAX_PAGES && !visited; pageNum++) {
+    for (let pageNum = 1; pageNum <= MAX_PAGES && !visitResult; pageNum++) {
       if (pageNum > 1) {
         console.log(`\n--- Checking page ${pageNum} of results ---`);
         const base = activePage.url();
@@ -1086,8 +1569,8 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
         await sleep(rand(2500, 5000));
 
         if (isCaptchaPage(activePage.url())) {
-          console.log(`CAPTCHA on page ${pageNum}, trying checkbox click...`);
-          if (!(await tryClickCaptchaCheckbox(activePage, device))) break;
+          console.log(`CAPTCHA on page ${pageNum}, trying checkbox click then image solver...`);
+          if (!(await solveCaptcha(activePage, proxyAuth, device, `page_${pageNum}`))) break;
 
           // Captcha redirect may drop the &page=N param — restore it so we
           // don't accidentally rescan page 1
@@ -1103,13 +1586,12 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
         await sleep(rand(1000, 2000));
       }
 
-      visited = await findAndVisitTarget(activePage, targetDomain, device);
+      visitResult = await findAndVisitTarget(activePage, targetDomain, device);
     }
 
-    if (!visited) {
-      // Target not in top pages — go directly (behavioral factor still counts)
+    if (!visitResult) {
+      // No target link found in the scanned pages; record a direct fallback.
       console.log(`\n--- Target not found in top ${MAX_PAGES} pages, navigating directly ---`);
-      const domainsToMatch = buildDomains(targetDomain);
 
       // Mobile proxy tunnels occasionally drop CONNECT — retry once
       let navOk = false;
@@ -1128,14 +1610,21 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       console.log('');
       console.log('=== RESULT ===');
       console.log('Final URL:', finalUrl);
-      console.log('Target domain reached:', domainsToMatch.some(d => finalUrl.includes(d)) ? 'YES' : 'NO');
+      visitResult = navOk
+        ? await arrivalResult(activePage, targetDomain, 'direct', 'target-not-found-in-scanned-results')
+        : failedVisit('direct-navigation-failed');
+      console.log('Target domain reached:', visitResult.ok ? 'YES' : 'NO');
+      console.log('Visit source:', visitResult.ok ? visitResult.source : 'FAIL', '|', visitResult.reason);
+      if (!visitResult.ok) return visitResult;
 
-      await activePage.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true });
+      await activePage.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true }).catch(() => {});
       console.log(`Screenshot saved: ${targetDomain}_from_yandex.png`);
 
-      await visitSite(activePage, targetDomain, device);
+      await visitSite(activePage, targetDomain, device).catch(() => {
+        console.log('  Target reached; subsequent site browsing failed.');
+      });
     }
-    return true;
+    return visitResult;
 
   } finally {
     if (resultPage) { try { await resultPage.close(); } catch {} }
@@ -1352,51 +1841,193 @@ async function collectInternalFallbackUrls(page, domainsToMatch, visited) {
   }, domainsToMatch, Array.from(visited)).catch(() => []);
 }
 
-async function warmUpProfile(browser, proxyAuth, device, profileDir) {
-  const marker = path.join(profileDir, '.warmed');
-  if (fs.existsSync(marker)) return;
+// ─── Profile warm-up (trust building) ─────────────────────
+//
+// A "quality" profile is built by accumulating REAL browsing behaviour across
+// many sessions on the SAME exit IP, not by a single first-run visit. The old
+// warm-up hit ya.ru once and set a permanent .warmed marker, so the profile
+// only ever held 2-3 cookies. We now browse several neutral domains with real
+// behaviour (scroll, idle reads, organic clicks with dwell time), record every
+// warm session in warm-history.json, and re-warm on every proxy session
+// (gated by HAIBO_WARM_SESSION, default on). A forced deep warm is available
+// via HAIBO_FORCE_WARM=1.
 
-  console.log('--- First run: warming up profile (cookies/history) ---');
+const WARM_NEUTRAL_SITES = [
+  'https://ya.ru/',
+  'https://yandex.ru/pogoda/',
+  'https://yandex.ru/pogoda/msk',
+  'https://yandex.ru/news',
+  'https://auto.ru/cars/new/',
+  'https://www.kinopoisk.ru/lists/pick/',
+  'https://ru.wikipedia.org/wiki/Автомобиль',
+  'https://yandex.ru/maps/',
+];
+
+function warmHistoryPath(profileDir) {
+  return path.join(profileDir, 'warm-history.json');
+}
+
+function readWarmHistory(profileDir) {
   try {
-    const page = await browser.newPage();
-    await humanizePage(page, device);
-    await authenticateIfNeeded(page, proxyAuth);
-
-    await gotoWithRetry(page, 'https://yandex.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(rand(3000, 6000));
-    await humanActivity(page, device);
-    await scrollToBottom(page, device);
-    await sleep(rand(2000, 4000));
-
-    // A second neutral page deepens the cookie set
-    await gotoWithRetry(page, 'https://ya.ru/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-    await sleep(rand(2500, 5000));
-    await humanActivity(page, device);
-
-    fs.writeFileSync(marker, String(Date.now()));
-    await page.close();
-    console.log('--- Profile warmed ---');
-  } catch (e) {
-    console.log(`Warm-up skipped: ${e.message}`);
+    const data = JSON.parse(fs.readFileSync(warmHistoryPath(profileDir), 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
   }
 }
 
+function appendWarmHistory(profileDir, entry) {
+  const history = readWarmHistory(profileDir);
+  history.push(entry);
+  try {
+    fs.writeFileSync(warmHistoryPath(profileDir), JSON.stringify(history, null, 2));
+  } catch (e) {
+    console.log(`  ⚠️ Failed to persist warm history: ${e.message}`);
+  }
+}
+
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Open one neutral page and behave like a real returning user: scroll with
+ * pauses, idle reads, click a visible organic link and dwell on it.
+ */
+async function warmVisitPage(browser, proxyAuth, url, device, index, total) {
+  const page = await browser.newPage();
+  await humanizePage(page, device);
+  await authenticateIfNeeded(page, proxyAuth);
+  let hitCaptcha = false;
+  warmVisitPage._lastHitCaptcha = false;
+  try {
+    await gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    console.log(`  [warm ${index}/${total}] ${url}`);
+    await sleep(rand(2500, 5000));
+    if (isCaptchaPage(page.url())) {
+      hitCaptcha = true;
+      warmVisitPage._lastHitCaptcha = true;
+      console.log(`  [warm ${index}/${total}] captcha wall at ${page.url().substring(0, 80)} — exit IP is dirty`);
+    }
+    await humanActivity(page, device);
+    await scrollToBottom(page, device);
+    await sleep(rand(1500, 3500));
+
+    const link = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll('a[href^="http"]'));
+      for (const el of nodes) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.top > 80 && r.top < window.innerHeight) {
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), href: el.href };
+        }
+      }
+      return null;
+    }).catch(() => null);
+
+    if (link) {
+      console.log(`  [warm ${index}/${total}] click → ${link.href.substring(0, 80)}`);
+      if (device === 'mobile') {
+        await page.touchscreen.tap(link.x, link.y).catch(() => {});
+      } else {
+        await page.mouse.move(link.x, link.y, { steps: rand(8, 16) }).catch(() => {});
+        await sleep(rand(120, 360));
+        await page.mouse.click(link.x, link.y, { delay: rand(60, 140) }).catch(() => {});
+      }
+      await sleep(rand(3000, 7000));
+      await humanActivity(page, device);
+      await scrollToBottom(page, device).catch(() => {});
+      await sleep(rand(1500, 3000));
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      await sleep(rand(1200, 2500));
+    }
+    return true;
+  } catch (e) {
+    console.log(`  [warm ${index}/${total}] skipped ${url}: ${e.message}`);
+    return false;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+function warmEnabled() {
+  const v = process.env.HAIBO_WARM_SESSION;
+  return v === undefined ? true : /^(1|true|yes|on)$/i.test(String(v));
+}
+
+function warmSiteCount() {
+  const n = Number(process.env.HAIBO_WARM_SITES || 4);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 4;
+}
+
+/**
+ * Warm-up now runs per proxy session (not once forever). It browses a shuffled
+ * subset of neutral domains with human behaviour and records the session in
+ * warm-history.json so trust accumulates across runs.
+ */
+async function warmUpProfile(browser, proxyAuth, device, profileDir, sessionNumber) {
+  if (!warmEnabled()) {
+    console.log('--- Profile warm-up skipped (HAIBO_WARM_SESSION=0) ---');
+    return;
+  }
+  const force = /^(1|true|yes|on)$/i.test(String(process.env.HAIBO_FORCE_WARM || ''));
+  const sites = shuffleArray(WARM_NEUTRAL_SITES).slice(0, Math.min(warmSiteCount(), WARM_NEUTRAL_SITES.length));
+  const total = sites.length;
+
+  console.log(`--- Warm-up (session ${sessionNumber || '?'}${force ? ' | forced deep' : ''}): ${total} neutral sites ---`);
+  let visited = 0;
+  let captchaSeen = false;
+  for (let i = 0; i < total; i++) {
+    const ok = await warmVisitPage(browser, proxyAuth, sites[i], device, i + 1, total);
+    if (ok) visited++;
+    if (warmVisitPage._lastHitCaptcha) captchaSeen = true;
+    if (i < total - 1) await sleep(rand(4000, 9000));
+  }
+
+  // Propagate the warm-up captcha signal to the search flow: a dirty exit IP
+  // means the ya.ru homepage is itself a captcha wall, so the search step must
+  // skip the homepage form and go straight to the direct SERP URL.
+  runSearchAndVisit._warmHitCaptcha = captchaSeen;
+  if (captchaSeen) {
+    console.log('  Warm-up hit captcha — search will use direct SERP URLs');
+  }
+
+  const ip = readWarmHistory(profileDir);
+  const entry = { ts: new Date().toISOString(), session: sessionNumber || null, sites: total, visited, device };
+  appendWarmHistory(profileDir, entry);
+  try {
+    fs.writeFileSync(path.join(profileDir, '.warmed'), String(Date.now()));
+  } catch {}
+  console.log(`--- Profile warmed: ${visited}/${total} sites; total warm sessions=${ip.length + 1} ---`);
+}
+
 async function launchBrowserSession(profileDir, proxyAuth) {
+  // headless:false — SmartCaptcha fingerprints the headless GPU/network
+  // stack; a real (headed) Chrome plus the stealth plugin plus the manual
+  // navigator patches are what actually clears the captcha wall.
+  // Set HAIBO_HEADLESS=1 to launch hidden instead (new headless mode still
+  // runs a real Chrome; only use it if captcha does not appear).
+  const headless = /^(1|true|yes|on)$/i.test(String(process.env.HAIBO_HEADLESS || ''));
   return await puppeteer.launch({
-    headless: 'new',
+    headless: headless ? 'new' : false,
     userDataDir: profileDir,
+    timeout: Number.isFinite(BROWSER_LAUNCH_TIMEOUT_MS) && BROWSER_LAUNCH_TIMEOUT_MS > 0
+      ? BROWSER_LAUNCH_TIMEOUT_MS
+      : 45000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       `--proxy-server=http://${proxyAuth.host}:${proxyAuth.port}`,
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-default-apps',
-      '--disable-extensions',
-      '--disable-dev-shm-usage',
       '--proxy-bypass-list=<-loopback>',
       '--lang=ru-RU',
-      '--accept-lang=ru-RU,ru,en-US,en'
+      '--accept-lang=ru-RU,ru,en-US,en',
+      '--disable-blink-features=AutomationControlled',
+      '--no-first-run',
+      '--no-default-browser-check'
     ],
     ignoreDefaultArgs: ['--enable-automation']
   });
@@ -1416,50 +2047,71 @@ function normalizeProxyIp(ipText) {
 
 async function testProxyIp(browser, proxyAuth, device = 'desktop') {
   console.log('--- Testing proxy connectivity ---');
-  const testPage = await browser.newPage();
-  await humanizePage(testPage, device);
-  await authenticateIfNeeded(testPage, proxyAuth);
+  const maxAttempts = Number.isFinite(PROXY_IP_CHECK_ATTEMPTS) && PROXY_IP_CHECK_ATTEMPTS > 0
+    ? Math.floor(PROXY_IP_CHECK_ATTEMPTS)
+    : 3;
+  const timeoutMs = Number.isFinite(PROXY_IP_CHECK_TIMEOUT_MS) && PROXY_IP_CHECK_TIMEOUT_MS >= 5000
+    ? PROXY_IP_CHECK_TIMEOUT_MS
+    : 20000;
+  const retryWaitMs = Number.isFinite(PROXY_IP_CHECK_RETRY_WAIT_MS) && PROXY_IP_CHECK_RETRY_WAIT_MS >= 1000
+    ? PROXY_IP_CHECK_RETRY_WAIT_MS
+    : 8000;
 
-  try {
-    // Mobile proxies occasionally drop the CONNECT tunnel during IP
-    // rotation — retry before giving up.
-    let ipText = null;
-    for (let attempt = 1; attempt <= 3 && !ipText; attempt++) {
-      try {
-        await gotoWithRetry(testPage, 'https://api.ipify.org?format=json', {
-          waitUntil: 'domcontentloaded',
-          timeout: 20000
-        }, 1);
-        ipText = await testPage.evaluate(() => document.documentElement.textContent);
-      } catch (e) {
-        console.log(`  Proxy attempt ${attempt}/3 failed: ${e.message}`);
-        if (attempt < 3) await sleep(8000);
-      }
+  let ipText = null;
+  let lastError = null;
+
+  // Mobile proxies occasionally drop the CONNECT tunnel during IP rotation.
+  // Recreate the page on each attempt so a poisoned navigation state does not
+  // keep the whole session stuck.
+  for (let attempt = 1; attempt <= maxAttempts && !ipText; attempt++) {
+    const testPage = await browser.newPage();
+    try {
+      await humanizePage(testPage, device);
+      await authenticateIfNeeded(testPage, proxyAuth);
+      await gotoWithRetry(testPage, 'https://api.ipify.org?format=json', {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs
+      }, 1);
+      ipText = await testPage.evaluate(() => document.documentElement.textContent);
+    } catch (e) {
+      lastError = e;
+      console.log(`  Proxy attempt ${attempt}/${maxAttempts} failed: ${e.message}`);
+      if (attempt < maxAttempts) await sleep(retryWaitMs);
+    } finally {
+      await testPage.close().catch(() => {});
     }
-
-    if (!ipText) {
-      throw new Error('Proxy unreachable after 3 attempts — check geonix account or wait for IP rotation');
-    }
-
-    const ip = normalizeProxyIp(ipText);
-    console.log('Proxy IP:', ip);
-    console.log('');
-    return ip;
-  } finally {
-    await testPage.close().catch(() => {});
   }
+
+  if (!ipText) {
+    const detail = lastError && lastError.message ? ` Last error: ${lastError.message}` : '';
+    throw new Error(`Proxy unreachable after ${maxAttempts} attempts — check geonix account or wait for IP rotation.${detail}`);
+  }
+
+  const ip = normalizeProxyIp(ipText);
+  console.log('Proxy IP:', ip);
+  console.log('');
+  return ip;
 }
 
 async function openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber) {
   const shouldWaitForRotation = Boolean(previousIp);
-  const maxAttempts = Number.isFinite(PROXY_ROTATION_CHECK_ATTEMPTS) && PROXY_ROTATION_CHECK_ATTEMPTS > 0
+  const rotationAttempts = Number.isFinite(PROXY_ROTATION_CHECK_ATTEMPTS) && PROXY_ROTATION_CHECK_ATTEMPTS > 0
     ? Math.floor(PROXY_ROTATION_CHECK_ATTEMPTS)
     : 12;
+  const maxAttempts = shouldWaitForRotation ? rotationAttempts : 1;
   const waitMs = Number.isFinite(PROXY_ROTATION_WAIT_MS) && PROXY_ROTATION_WAIT_MS >= 1000
     ? PROXY_ROTATION_WAIT_MS
     : 30000;
+  const sessionStartMaxMs = Number.isFinite(PROXY_SESSION_START_MAX_MS) && PROXY_SESSION_START_MAX_MS >= 30000
+    ? PROXY_SESSION_START_MAX_MS
+    : 180000;
+  const startedAt = Date.now();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (Date.now() - startedAt > sessionStartMaxMs) {
+      throw new Error(`Proxy session ${sessionNumber} startup watchdog reached ${Math.round(sessionStartMaxMs / 1000)}s`);
+    }
+
     const browser = await launchBrowserSession(profileDir, proxyAuth);
     let currentIp = null;
 
@@ -1469,6 +2121,9 @@ async function openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousI
       await browser.close().catch(() => {});
       console.log(`--- Proxy check failed while waiting for rotation before session ${sessionNumber}: ${e.message}`);
       if (attempt < maxAttempts) {
+        if (Date.now() - startedAt + waitMs > sessionStartMaxMs) {
+          throw new Error(`Proxy session ${sessionNumber} startup watchdog reached ${Math.round(sessionStartMaxMs / 1000)}s after failed check`);
+        }
         console.log(`--- Waiting ${Math.round(waitMs / 1000)}s before retrying proxy session ${sessionNumber} (${attempt}/${maxAttempts}) ---`);
         await sleep(waitMs);
         continue;
@@ -1487,6 +2142,9 @@ async function openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousI
     await browser.close().catch(() => {});
 
     if (attempt < maxAttempts) {
+      if (Date.now() - startedAt + waitMs > sessionStartMaxMs) {
+        throw new Error(`Proxy session ${sessionNumber} startup watchdog reached ${Math.round(sessionStartMaxMs / 1000)}s while waiting for IP change`);
+      }
       await sleep(waitMs);
     }
   }
@@ -1527,6 +2185,9 @@ async function main() {
   let previousIp = null;
   let sessionNumber = 0;
   let browser = null;
+  const proxySessionRetryWaitMs = Number.isFinite(PROXY_SESSION_RETRY_WAIT_MS) && PROXY_SESSION_RETRY_WAIT_MS >= 1000
+    ? PROXY_SESSION_RETRY_WAIT_MS
+    : 300000;
 
   try {
     for (let batchStart = 0; batchStart < queries.length; batchStart += queriesPerSession) {
@@ -1534,25 +2195,40 @@ async function main() {
       const batchEnd = Math.min(batchStart + queriesPerSession, queries.length);
       console.log(`\n========== PROXY SESSION ${sessionNumber}: queries ${batchStart + 1}-${batchEnd}/${queries.length} ==========`);
 
-      const session = await openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber);
+      let session = null;
+      let sessionStartAttempt = 0;
+      while (!session) {
+        sessionStartAttempt++;
+        try {
+          session = await openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber);
+        } catch (e) {
+          console.log(`--- Proxy session ${sessionNumber} start attempt ${sessionStartAttempt} failed: ${e.message}`);
+          console.log(`--- Waiting ${Math.round(proxySessionRetryWaitMs / 1000)}s before retrying the same proxy session. Press Ctrl+C to stop. ---`);
+          await sleep(proxySessionRetryWaitMs);
+        }
+      }
+
       browser = session.browser;
       previousIp = session.ip;
 
-      // Warm up the persistent profile on first run only (cookies/history).
-      await warmUpProfile(browser, proxyAuth, device, profileDir);
+      // Warm up the persistent profile on every proxy session so trust
+      // (cookies, history, real browsing behaviour) accumulates over time.
+      await warmUpProfile(browser, proxyAuth, device, profileDir, sessionNumber);
 
       for (let i = batchStart; i < batchEnd; i++) {
         const query = queries[i];
         console.log(`\n========== QUERY ${i + 1}/${queries.length}: ${query} ==========`);
 
-        let ok = false;
+        let outcome = failedVisit('query-failed');
         try {
-          ok = await runSearchAndVisit(browser, proxyAuth, query, targetDomain, device);
+          outcome = await runSearchAndVisit(browser, proxyAuth, query, targetDomain, device);
         } catch (e) {
-          console.log(`Query failed: ${e.message}`);
+          console.log(`Query failed: ${redactSensitive(e.message, [proxyAuth.username, proxyAuth.password])}`);
+          outcome = failedVisit(SOLVER_TERMINAL_RETRY_ERRORS.test(e.message || '') ? 'solver-terminal'
+            : TRANSIENT_NET_ERRORS.test(e.message || '') ? 'network-error' : 'query-error');
         }
 
-        results.push({ query, ok, ip: previousIp });
+        results.push({ query, ...outcome, ip: previousIp });
 
         if (i < batchEnd - 1) {
           const pause = rand(45000, 90000);
@@ -1572,8 +2248,9 @@ async function main() {
 
     console.log('\n=== SUMMARY ===');
     for (const r of results) {
-      console.log(`${r.ok ? 'OK  ' : 'FAIL'} | ${r.ip || 'unknown-ip'} | ${r.query}`);
+      console.log(formatVisitSummary(r));
     }
+    console.log(`Totals: SEARCH=${results.filter(r => r.ok && r.source === 'search').length} | DIRECT=${results.filter(r => r.ok && r.source === 'direct').length} | FAIL=${results.filter(r => !r.ok).length}`);
   } finally {
     if (browser) {
       console.log('--- Closing browser ---');
@@ -1619,7 +2296,7 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
     console.log(`  Selector "${sel}" -> ${links.length} links`);
     for (const link of links) {
       const href = await page.evaluate(el => el.href, link);
-      if (href && domainsToMatch.some(d => href.includes(d))) {
+      if (href && matchesTarget(href, targetDomain)) {
         targetLink = link;
         foundUrl = href;
         break;
@@ -1634,7 +2311,7 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
     const allLinks = await page.$$('a[href]');
     for (const link of allLinks) {
       const href = await page.evaluate(el => el.href, link);
-      if (href && domainsToMatch.some(d => href.includes(d))) {
+      if (href && matchesTarget(href, targetDomain)) {
         targetLink = link;
         foundUrl = href;
         break;
@@ -1650,89 +2327,54 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
     if (urlMatch) {
       foundUrl = urlMatch[0];
       console.log('  Found URL in page text:', foundUrl);
-      // Try to click it by navigating directly
-      targetLink = { click: async () => { await gotoWithRetry(page, foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }); } };
+      if (!matchesTarget(foundUrl, targetDomain)) foundUrl = '';
     }
   }
 
-  if (!targetLink) {
+  if (!targetLink && !foundUrl) {
     console.log(`WARNING: Could not find ${targetDomain} on this page of results`);
-    return false;
+    return null;
   } else {
     console.log('Found link:', foundUrl);
 
     await sleep(rand(1000, 2000));
     await humanActivity(page, device);
 
-    console.log('--- Clicking target link ---');
-    // Yandex SERP links usually open in a NEW TAB (target="_blank"),
-    // so track pages created by the click and switch to the target one.
-    const knownPages = new Set(await page.browser().pages());
+    const searchPage = page;
+    let outcome = { page, result: failedVisit('text-url-only') };
+    if (targetLink) {
+      console.log('--- Clicking target link ---');
+      outcome = await followSearchLink(page, targetLink, targetDomain, device);
+      page = outcome.page;
+    }
     try {
-      // Human click: hover over the link first, then click a random point
-      // inside it (never the exact center).
-      let clickAction;
-      const box = await targetLink.boundingBox();
-      if (device === 'mobile' && box) {
-        // Real touch tap — phones have no hover/mousemove
-        const cx = box.x + box.width * rand(35, 65) / 100;
-        const cy = box.y + box.height * rand(35, 65) / 100;
-        await sleep(rand(400, 900));
-        clickAction = page.touchscreen.tap(cx, cy);
-      } else if (box) {
-        const cx = box.x + box.width * rand(30, 70) / 100;
-        const cy = box.y + box.height * rand(35, 65) / 100;
-        await page.mouse.move(cx, cy, { steps: rand(10, 20) });
-        await sleep(rand(400, 900));
-        clickAction = page.mouse.click(cx, cy, { delay: rand(50, 140) });
-      } else {
-        clickAction = targetLink.click({ delay: rand(50, 150) });
-      }
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
-        clickAction
-      ]);
-    } catch (e) {
-      console.log('Click failed:', e.message);
-    }
-
-    await sleep(rand(2000, 4000));
-
-    // If the original page did not reach the target, look for a new tab
-    if (!domainsToMatch.some(d => page.url().includes(d))) {
-      try {
-        const pagesNow = await page.browser().pages();
-        for (const p of pagesNow) {
-          if (knownPages.has(p)) continue;
-          const u = p.url();
-          if (domainsToMatch.some(d => u.includes(d))) {
-            console.log('  Target opened in a new tab:', u.substring(0, 100));
-            page = p;
-            break;
-          }
+      if (!outcome.result.ok) {
+        const reason = outcome.result.reason;
+        console.log(`  Search click not confirmed (${reason}); opening target directly.`);
+        try {
+          await gotoWithRetry(page, foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          outcome.result = await arrivalResult(page, targetDomain, 'direct', reason);
+        } catch {
+          outcome.result = failedVisit('direct-navigation-failed');
         }
-      } catch {}
-
-      // Still not on target — navigate directly as last resort
-      if (!domainsToMatch.some(d => page.url().includes(d))) {
-        console.log('  No new tab with target, navigating directly:', foundUrl);
-        await gotoWithRetry(page, foundUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
+
+      console.log('');
+      console.log('=== RESULT ===');
+      console.log('Final URL:', page.url());
+      console.log('Target domain reached:', outcome.result.ok ? 'YES' : 'NO');
+      console.log('Visit source:', outcome.result.ok ? outcome.result.source : 'FAIL', '|', outcome.result.reason);
+      if (!outcome.result.ok) return outcome.result;
+
+      await page.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true }).catch(() => {});
+      await visitSite(page, targetDomain, device).catch(() => {
+        console.log('  Target reached; subsequent site browsing failed.');
+      });
+      return outcome.result;
+    } finally {
+      // Close a target popup after browsing so it cannot leak into later queries.
+      if (page !== searchPage) await page.close().catch(() => {});
     }
-
-    await sleep(rand(2000, 4000));
-
-    const finalUrl = page.url();
-    console.log('');
-    console.log('=== RESULT ===');
-    console.log('Final URL:', finalUrl);
-    console.log('Target domain reached:', domainsToMatch.some(d => finalUrl.includes(d)) ? 'YES' : 'NO');
-
-    await page.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true });
-    console.log(`Screenshot saved: ${targetDomain}_from_yandex.png`);
-
-    await visitSite(page, targetDomain, device);
-    return true;
   }
 }
 

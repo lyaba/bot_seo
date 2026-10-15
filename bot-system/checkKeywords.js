@@ -1,3 +1,4 @@
+const proxies = require('./proxies');
 const { checkPosition } = require('./services/rankChecker');
 const fs = require('fs');
 const { takeScreenshot } = require('./services/siteScreenshot');
@@ -52,12 +53,10 @@ async function run() {
 
       console.log("Заходим на сайт");
 
-      const proxy = {
-        host: 'res.geonix.com',
-        port: '10000',
-        username: 'ad5b4adb1240604a',
-        password: '17e0UIjWRqhTN3J4'
-      };
+      const proxy = proxies[0];
+      if (!proxy || !proxy.host || !proxy.port) {
+        throw new Error('Proxy is not configured; set PROXY_HOST and PROXY_PORT');
+      }
 
       //  ПЕРЕДАЁМ KEYWORD
       const screenshot = await takeScreenshot(

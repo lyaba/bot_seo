@@ -1,5 +1,30 @@
 # PROJECT_CONTEXT.md
 
+## Backup before separate profiles — 2026-10-15
+
+- User explicitly requested a complete Git checkpoint and push before profile changes. Current branch: `main`; configured remote: `origin` (GitHub repository lyaba/bot_seo).
+- Backup scope includes all current source/config-registry changes and tests. Environment secrets, CAPTCHA config, browser profiles/cookies, screenshots and CAPTCHA DOM dumps are excluded. Added an ignore rule for `.captcha-screenshots/`.
+- Pre-push source inspection found a remaining literal proxy credential in `bot-system/checkKeywords.js`; replaced the inline proxy object with existing env-based `./proxies` configuration. No secret values were printed or copied. Existing Git history is not rewritten by this checkpoint.
+- Profile changes must start only after the checkpoint is successfully pushed. Separate browser storage and a warm-up step do not guarantee classification as different real people.
+
+## Visit source reporting — 2026-10-15
+
+- User-supplied live imperator-kzn log confirms the repaired textarea input completed a search on ya.ru. That run found the target link but invoked direct navigation afterward; the previous `OK` summary did not distinguish this from a search click.
+- Added `bot-haibo/visit-result.js`: hostname-based target validation (including subdomains and IDN), checks of the loaded document rather than only the requested URL, and observation of same-tab / opener-associated popup arrivals after a real link click. Existing unrelated tabs cannot satisfy the click result. Links are scrolled into view before interaction. Target enumeration avoids waiting on uninitialized blank popup pages.
+- `findAndVisitTarget()` now returns structured visit results, distinguishes text-only URLs and direct fallback from confirmed clicks, rejects unsuccessful arrivals, and closes the successful target popup after site browsing. Subsequent browsing/screenshot failure does not erase an already confirmed arrival.
+- `runSearchAndVisit()` propagates the result and no longer returns success unconditionally after failed direct navigation. CLI summary labels: `SEARCH` (target document reached after a result-link click), `DIRECT` (target reached through explicit navigation), `FAIL` (target not reached / query failed). Each row carries a reason, with aggregate counts. No claim is made about how analytics attributes these visits. Batch-runner process exit semantics are unchanged.
+- New `bot-haibo/test/visit-result.test.js` passed 9/9 browser tests: hostname lookalikes and IDN, offscreen mobile same-tab click, delayed popup, unrelated existing tabs, blocked click/direct fallback, text-only URL, aborted navigation, HTTP 503, and failed direct fallback after scanning results. Tests intercept network requests; the last query-flow test uses a controlled navigation exception to avoid a Chromium error-page cleanup hang seen with repeated intercepted aborts.
+- Syntax checks and scoped whitespace checks passed. No live searches, production profiles, proxy sessions, paid CAPTCHA tasks, commits or pushes were performed. CAPTCHA handling and profile/IP rotation were not changed.
+
+## Search input repair — 2026-10-15
+
+- Confirmed in the supplied imperator-kzn log: an element matching `#text` was found, focus verification failed, direct search navigation reached Yandex SmartCaptcha, local solving did not pass, and Python created a Turnstile task. The fragment ends during polling; the final task outcome is unknown.
+- Confirmed source issues: old focus verification accepted any input/textarea rather than the intended field, used mouse clicks in mobile mode, suppressed interaction errors, checked only a query prefix, and selected a submit button from the whole document.
+- Added `bot-haibo/search-input.js` and connected it to `yandex_search_visit.js`: scans all candidates including textarea and wrapper descendants, ignores hidden/noneditable fields, uses touch taps on mobile, verifies the exact focused field, clears through selection/Backspace, types characters with variable pauses, verifies the complete query, submits its own form and waits for a response. Failures log the stage without field values, page content or URLs. Direct-search fallback remains.
+- Added `bot-haibo/test/search-input.test.js`: six browser tests passed with all requests intercepted locally (mobile textarea/wrapper/hidden field selection and correct form, desktop Enter and stale text, focus redirected before typing, truncated query rejection, focus lost during typing, and submission without response).
+- Verification: `node --test bot-haibo/test/search-input.test.js` passed 6/6; JavaScript syntax checks and scoped `git diff --check` passed. Chromium required execution outside the restricted sandbox. No live Yandex search, production profile, proxy session, or paid solver task was started during this work.
+- Limitation: local tests confirm the interaction behavior; the exact cause of the original live focus failure and behavior against the current Yandex page remain unconfirmed. CAPTCHA solver behavior was not changed.
+
 ## Project Overview
 
 Three bot projects analyzed: **bot-gir-master**, **bot-system**, **bot-haibo**.
@@ -55,6 +80,7 @@ Three bot projects analyzed: **bot-gir-master**, **bot-system**, **bot-haibo**.
 - `services/fingerprint/` — Fingerprint subdirectory (EXAMINED: generator.js, applyFingerprint.js, devices.js, behavior.js all simple modules)
 - `workers/worker.js` — BullMQ worker with Puppeteer StealthPlugin (EXAMINED: 96 lines)
 - Screenshot images: multiple `.png` files from `horgos-auto.com` tests
+- `projects.json` contains a confirmed `tatspise` project entry for `tatspise.ru`, but there is no `tatspise.sh` launcher in `bot-haibo`; launch it directly with `node yandex_search_visit.js --project tatspise` or create a matching shell wrapper.
 
 ---
 
@@ -699,6 +725,7 @@ Goal: visit haibomotor.ru from Yandex SERP by queries with behavioral factor, th
 21. **Touch-mode for device:"mobile"** — closes the "phone with a mouse" detection gap: real touch events via `page.touchscreen` (`tap` for clicks, `touchStart/touchMove/touchEnd` swipes for scrolling and ambient activity); NO mousemove/mouse-click events emitted in mobile mode; inertial flick-scrolls (fast start, decelerating tail) replace window.scrollBy; captcha checkbox tapped; SERP and internal links tapped at jittered points. Desktop mode unchanged (mouse moves/clicks). Device param threaded through runSearchAndVisit → tryClickCaptchaCheckbox / findAndVisitTarget / visitSite / warmUpProfile. Metrica robot-check should now see consistent phone behavior.
 22. **Profile reset practice** — delete only one accumulated browser profile at a time with `rm -rf bot-haibo/.profiles/<project>`. Confirmed cleanup: `bot-haibo/.profiles/top-design-remont` was removed on request; other project profiles remained intact. Routine deletion is not needed after every run; reset a profile when captcha/reputation gets stuck, cookies look poisoned, project config/device changed, or after a long noisy/debug run.
 23. **Confirmed proxy config location (2026-08-28)** — `bot-haibo` proxy is changed in `bot-haibo/.env` via `HAIBO_PROXY_HOST`, `HAIBO_PROXY_PORT`, `HAIBO_PROXY_USERNAME`, `HAIBO_PROXY_PASSWORD`; `bot-haibo/projects.json` does not control proxy. `bot-haibo/proxies.js` now loads `bot-haibo/.env` by absolute `__dirname` path with quiet dotenv output, so config works from both project scripts and manual root-level Node runs. Current confirmed host/port: `res.geonix.com:10000`; auth values are intentionally not documented.
+24. **Proxy-session recovery hardening (2026-10-07)** — before changes, `horgos-auto` session 2 (`queries 5-8/44`) could appear stuck while `api.ipify.org` proxy checks retried during mobile-proxy tunnel failures (`ERR_TUNNEL_CONNECTION_FAILED`, navigation timeouts). `bot-haibo/yandex_search_visit.js` now bounds browser launch and proxy-session startup, recreates the IP-check page on every attempt, and closes bad browsers. Final compromise after user feedback: do **not** mark all 44 queries as failed when the proxy is down. If a proxy session cannot start, the bot waits 5 minutes by default (`HAIBO_PROXY_SESSION_RETRY_WAIT_MS=300000`) and retries the same session; summary includes only queries actually processed. Ctrl+C remains the manual stop. New env tuning knobs: `HAIBO_PROXY_IP_CHECK_ATTEMPTS`, `HAIBO_PROXY_IP_CHECK_TIMEOUT_MS`, `HAIBO_PROXY_IP_CHECK_RETRY_WAIT_MS`, `HAIBO_PROXY_SESSION_START_MAX_MS`, `HAIBO_BROWSER_LAUNCH_TIMEOUT_MS`, `HAIBO_PROXY_SESSION_RETRY_WAIT_MS`. Also fixed confirmed desktop-mode recursion bug in `humanActivity()` by calling `humanMouse()` for desktop activity.
 
 ### GIT SNAPSHOT (this commit)
 

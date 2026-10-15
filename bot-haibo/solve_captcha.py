@@ -13,6 +13,7 @@ Usage:
 Config: config/captcha.json (optional)
 """
 
+import base64
 import json
 import os
 import sys
@@ -258,36 +259,77 @@ def post_create_task(api_url, payload, headers, retries, proxies=None, deadline=
     raise last_error
 
 
-def create_captcha_task_cloud(config, captcha_url, website_key, proxy=None, deadline=None, api_proxies=None):
-    """Create a captcha solving task on CapMonster Cloud."""
+def create_captcha_task_cloud(config, captcha_url, website_key, proxy=None, deadline=None, api_proxies=None, image_b64=None):
+    """Create a captcha solving task on CapMonster Cloud.
+
+    Image-based SmartCaptcha (the variant Yandex serves after the checkbox)
+    is solved with ImageToTextTask, which needs only the base64 image.
+    Without an image we fall back to the Turnstile checkbox task (sitekey).
+    """
     api_url = config["cloud"]["api_url"]
     headers = {"Content-Type": "application/json"}
     proxy_fields = parse_proxy(proxy)
     user_agent = config.get("solving", {}).get("user_agent")
 
-    payload = {
-        "clientKey": config["cloud"].get("api_key", ""),
-        "task": {
-            "type": "RecaptchaV2Task",
-            "websiteURL": captcha_url,
-            "websiteKey": website_key,
-        }
-    }
-    if user_agent:
-        payload["task"]["userAgent"] = user_agent
+    # SmartCaptcha checkbox/pow page: imageSrc is EMPTY and the challenge is
+    # solved by clicking the checkbox (which yields a long token). The page URL
+    # still contains "captcha", so the old heuristic misrouted it to OCR and
+    # produced a garbage 4-char token. Route checkbox -> Turnstile instead.
+    is_checkbox_page = False
+    try:
+        resp = requests.get(captcha_url, timeout=15, proxies=api_proxies)
+        if "checkbox-captcha-form" in resp.text or "CheckboxCaptcha-Button" in resp.text:
+            is_checkbox_page = True
+    except Exception as e:
+        log(f"  Could not fetch captcha page for checkbox detection: {e}")
 
-    if proxy_fields:
-        payload["task"] = {
-            "type": "RecaptchaV2Task",
+    if image_b64 and not is_checkbox_page:
+        # Image challenge: plain text/OCR task. No sitekey, no page load.
+        task = {
+            "type": "ImageToTextTask",
+            "body": image_b64,
+        }
+    else:
+        # Checkbox/pow challenge (or image capture failed): solve as a
+        # Turnstile-style widget — the worker clicks the checkbox and returns a
+        # real token. RecaptchaV2Task fails here because the page has no
+        # reCAPTCHA script.
+        if image_b64 and is_checkbox_page:
+            log("  Captcha page is checkbox/pow (empty imageSrc) — routing to TurnstileTaskProxyless instead of OCR")
+        task = {
+            "type": "TurnstileTaskProxyless",
             "websiteURL": captcha_url,
-            "websiteKey": website_key,
-            **proxy_fields,
+            "websiteKey": website_key or DEFAULT_WEBSITE_KEY,
         }
         if user_agent:
-            payload["task"]["userAgent"] = user_agent
+            task["userAgent"] = user_agent
+        # TurnstileTaskProxyless needs NO task proxy: the worker solves it
+        # directly from CapMonster's own IPs. A task proxy here would use the
+        # bot's residential IP (already burned -> "Check your connection").
+        if proxy_fields:
+            log("  Note: ignoring task proxy for TurnstileTaskProxyless (proxyless worker solves directly)")
+
+    payload = {
+        "clientKey": config["cloud"].get("api_key", ""),
+        "task": task,
+    }
 
     retries = config["solving"].get("task_create_retries", 3)
     return post_create_task(api_url, payload, headers, retries, api_proxies, deadline)
+
+
+def extract_solution(data):
+    """Return the captcha solution as a string.
+
+    Turnstile/reCAPTCHA tasks return solution.token; ImageToTextTask returns
+    solution.text (sometimes answer/gRecaptcha). Prefer the text value.
+    """
+    solution = data.get("solution") or {}
+    for key in ("token", "text", "answer", "gRecaptcha"):
+        value = solution.get(key)
+        if value:
+            return value
+    return ""
 
 
 def get_captcha_result_cloud(config, task_id, proxies=None, deadline=None):
@@ -324,8 +366,8 @@ def get_captcha_result_cloud(config, task_id, proxies=None, deadline=None):
 
         status = data.get("status")
         if status == "ready":
-            token = data["solution"]["token"]
-            log(f"  ✓ Captcha solved! Token received ({attempt + 1} attempts)")
+            token = extract_solution(data)
+            log(f"  ✓ Captcha solved! Solution received ({attempt + 1} attempts)")
             return token
         elif status == "processing":
             remaining_attempts = max_attempts - attempt - 1
@@ -338,33 +380,33 @@ def get_captcha_result_cloud(config, task_id, proxies=None, deadline=None):
 
 # ─── Local Server Methods ────────────────────────────────
 
-def create_captcha_task_local(config, captcha_url, website_key, proxy=None, deadline=None):
+def create_captcha_task_local(config, captcha_url, website_key, proxy=None, deadline=None, image_b64=None):
     """Create a captcha solving task on local CapMonster server."""
     server = config["local"]["server_url"]
     headers = {"Content-Type": "application/json"}
     proxy_fields = parse_proxy(proxy)
     user_agent = config.get("solving", {}).get("user_agent")
 
-    payload = {
-        "clientKey": config["local"].get("api_key", ""),
-        "task": {
-            "type": "RecaptchaV2Task",
-            "websiteURL": captcha_url,
-            "websiteKey": website_key,
+    if image_b64:
+        task = {
+            "type": "ImageToTextTask",
+            "body": image_b64,
         }
-    }
-    if user_agent:
-        payload["task"]["userAgent"] = user_agent
-
-    if proxy_fields:
-        payload["task"] = {
-            "type": "RecaptchaV2Task",
+    else:
+        task = {
+            "type": "TurnstileTaskProxyless",
             "websiteURL": captcha_url,
             "websiteKey": website_key,
-            **proxy_fields,
         }
         if user_agent:
-            payload["task"]["userAgent"] = user_agent
+            task["userAgent"] = user_agent
+        if proxy_fields:
+            task.update(proxy_fields)
+
+    payload = {
+        "clientKey": config["local"].get("api_key", ""),
+        "task": task,
+    }
 
     retries = config["solving"].get("task_create_retries", 3)
     return post_create_task(server, payload, headers, retries, deadline=deadline)
@@ -404,8 +446,8 @@ def get_captcha_result_local(config, task_id, proxies=None, deadline=None):
 
         status = data.get("status")
         if status == "ready":
-            token = data["solution"]["token"]
-            log(f"  ✓ Captcha solved! Token received ({attempt + 1} attempts)")
+            token = extract_solution(data)
+            log(f"  ✓ Captcha solved! Solution received ({attempt + 1} attempts)")
             return token
         elif status == "processing":
             remaining_attempts = max_attempts - attempt - 1
@@ -459,17 +501,26 @@ def extract_yandex_website_key(captcha_url, fallback_key=DEFAULT_WEBSITE_KEY):
 
 # ─── Main Solver ────────────────────────────────────────
 
-def solve_captcha(captcha_url, config, sitekey=None):
-    """Solve a Yandex captcha and return the token."""
+def solve_captcha(captcha_url, config, sitekey=None, image_b64=None):
+    """Solve a Yandex captcha and return the solution (token or text).
+
+    With image_b64 the task is ImageToTextTask (Yandex image challenge) and
+    the sitekey is irrelevant. Without it we fall back to the Turnstile-style
+    checkbox task, which needs the sitekey.
+    """
     proxy = config["solving"].get("proxy_for_solving")
     mode = config.get("mode", "cloud")
     mode_config = config.get(mode, {})
     wall_timeout = int(mode_config.get("timeout", 120))
     deadline = time.monotonic() + wall_timeout
 
-    # Use caller-provided dynamic sitekey first, then try fetching the captcha page.
-    website_key = sitekey or extract_yandex_website_key(captcha_url)
-    log(f"  Using sitekey: {website_key[:20]}...")
+    if image_b64:
+        log(f"  Solving image captcha (ImageToTextTask, {len(image_b64)} chars base64)")
+        website_key = sitekey or ""
+    else:
+        # Use caller-provided dynamic sitekey first, then try fetching the captcha page.
+        website_key = sitekey or extract_yandex_website_key(captcha_url)
+        log(f"  Using sitekey: {website_key[:20]}...")
     log(f"  Solver wall-clock timeout: {wall_timeout}s")
 
     # Update task with real key
@@ -478,10 +529,10 @@ def solve_captcha(captcha_url, config, sitekey=None):
     log(f"  CapMonster task proxy: {'yes' if proxy else 'no'}")
 
     if mode == "cloud":
-        task_id = create_captcha_task_cloud(config, captcha_url, website_key, proxy, deadline, api_proxies)
+        task_id = create_captcha_task_cloud(config, captcha_url, website_key, proxy, deadline, api_proxies, image_b64)
         token = get_captcha_result_cloud(config, task_id, api_proxies, deadline)
     elif mode == "local":
-        task_id = create_captcha_task_local(config, captcha_url, website_key, proxy, deadline)
+        task_id = create_captcha_task_local(config, captcha_url, website_key, proxy, deadline, image_b64)
         token = get_captcha_result_local(config, task_id, None, deadline)
     else:
         raise ValueError(f"Unknown mode: {mode}")
@@ -529,6 +580,26 @@ def apply_token(page, token):
 
 # ─── CLI Entry Point ────────────────────────────────────
 
+def load_captcha_image(args):
+    """Return the captcha image as raw base64 (no data: prefix).
+
+    Priority: --captcha-image-file (preferred: the image never appears in
+    argv), then --captcha-image (base64 in argv), then stdin (a base64 line
+    piped on stdin). Returns None when no image was supplied, in which case
+    the caller falls back to the Turnstile checkbox task.
+    """
+    if args.captcha_image_file:
+        with open(args.captcha_image_file, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    if args.captcha_image:
+        return args.captcha_image
+    if args.image_from_stdin:
+        data = sys.stdin.buffer.read()
+        if data:
+            return base64.b64encode(data).decode("ascii")
+    return None
+
+
 def main():
     import argparse
 
@@ -536,6 +607,10 @@ def main():
     parser.add_argument("--url", help="Yandex captcha page URL")
     parser.add_argument("--proxy", help="Proxy for solving: host:port:user:pass")
     parser.add_argument("--sitekey", help="Captcha website key extracted from the browser page")
+    parser.add_argument("--captcha-image", help="Captcha image as base64 (ImageToTextTask body)")
+    parser.add_argument("--captcha-image-file", help="Path to a captcha image PNG; base64-encoded here")
+    parser.add_argument("--image-from-stdin", action="store_true",
+                        help="Read the captcha image bytes from stdin")
     parser.add_argument("--self-test", action="store_true", help="Check Python/import/config startup without solving")
     parser.add_argument("--output", default="json", choices=["json", "token"], 
                         help="Output format (default: json)")
@@ -562,13 +637,20 @@ def main():
         sys.exit(1)
 
     captcha_url = args.url
+    try:
+        image_b64 = load_captcha_image(args)
+    except Exception as e:
+        log(f"  Warning: could not load captcha image: {e}")
+        image_b64 = None
+
     log(f"=== Yandex Captcha Solver ===")
     log(f"Captcha URL: {captcha_url}")
     log(f"Mode: {config.get('mode', 'cloud')}")
+    log(f"Image task: {'yes' if image_b64 else 'no (Turnstile checkbox fallback)'}")
     log("")
 
     try:
-        token = solve_captcha(captcha_url, config, args.sitekey)
+        token = solve_captcha(captcha_url, config, args.sitekey, image_b64)
         
         if args.output == "json":
             result = {"token": token, "status": "success"}
