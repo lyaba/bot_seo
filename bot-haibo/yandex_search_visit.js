@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const proxies = require('./proxies');
 const { searchViaForm } = require('./search-input');
+const { normalizeIp, openIpProfileSession } = require('./ip-profile');
 const { matchesTarget, failedVisit, arrivalResult, followSearchLink, formatVisitSummary } = require('./visit-result');
 
 puppeteer.use(StealthPlugin());
@@ -1906,13 +1907,15 @@ async function warmVisitPage(browser, proxyAuth, url, device, index, total) {
   let hitCaptcha = false;
   warmVisitPage._lastHitCaptcha = false;
   try {
-    await gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const response = await gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    if (response && !response.ok()) throw new Error('Warm-up page returned an HTTP error');
     console.log(`  [warm ${index}/${total}] ${url}`);
     await sleep(rand(2500, 5000));
     if (isCaptchaPage(page.url())) {
       hitCaptcha = true;
       warmVisitPage._lastHitCaptcha = true;
       console.log(`  [warm ${index}/${total}] captcha wall at ${page.url().substring(0, 80)} — exit IP is dirty`);
+      return false;
     }
     await humanActivity(page, device);
     await scrollToBottom(page, device);
@@ -1972,7 +1975,7 @@ function warmSiteCount() {
 async function warmUpProfile(browser, proxyAuth, device, profileDir, sessionNumber) {
   if (!warmEnabled()) {
     console.log('--- Profile warm-up skipped (HAIBO_WARM_SESSION=0) ---');
-    return;
+    return { skipped: true, visited: 0, total: 0 };
   }
   const force = /^(1|true|yes|on)$/i.test(String(process.env.HAIBO_FORCE_WARM || ''));
   const sites = shuffleArray(WARM_NEUTRAL_SITES).slice(0, Math.min(warmSiteCount(), WARM_NEUTRAL_SITES.length));
@@ -2000,9 +2003,10 @@ async function warmUpProfile(browser, proxyAuth, device, profileDir, sessionNumb
   const entry = { ts: new Date().toISOString(), session: sessionNumber || null, sites: total, visited, device };
   appendWarmHistory(profileDir, entry);
   try {
-    fs.writeFileSync(path.join(profileDir, '.warmed'), String(Date.now()));
+    if (visited > 0) fs.writeFileSync(path.join(profileDir, '.warmed'), String(Date.now()));
   } catch {}
-  console.log(`--- Profile warmed: ${visited}/${total} sites; total warm sessions=${ip.length + 1} ---`);
+  console.log(`--- Profile warm-up: ${visited}/${total} sites; total warm sessions=${ip.length + 1} ---`);
+  return { skipped: false, visited, total };
 }
 
 async function launchBrowserSession(profileDir, proxyAuth) {
@@ -2176,10 +2180,21 @@ async function main() {
   console.log(`Proxy rotation: ${queriesPerSession} queries per browser session`);
   console.log('');
 
-  // Persistent per-project profile: cookies, localStorage and history
-  // survive between runs — the bot appears as a returning user.
-  const profileDir = path.join(__dirname, '.profiles', projectName);
-  fs.mkdirSync(profileDir, { recursive: true });
+  // Keep the original .profiles/<project> untouched. Probes have separate
+  // browser storage; each project/device/IP gets its own persistent directory.
+  const profilesRoot = path.join(__dirname, '.profiles');
+  const projectKey = encodeURIComponent(projectName).replace(/\./g, '%2E');
+  const probeDir = path.join(profilesRoot, '.proxy-check', projectKey, device);
+  fs.mkdirSync(probeDir, { recursive: true });
+  console.log('Profiles: separate persistent storage for each project/device/IP');
+
+  const startProfileSession = (previous, number, initialIp) => openIpProfileSession({
+    root: profilesRoot, projectName, device, initialIp,
+    probe: () => openBrowserWithRotatedIp(probeDir, proxyAuth, device, previous, number),
+    launch: dir => launchBrowserSession(dir, proxyAuth),
+    checkIp: activeBrowser => testProxyIp(activeBrowser, proxyAuth, device),
+    warm: (activeBrowser, dir) => warmUpProfile(activeBrowser, proxyAuth, device, dir, number),
+  });
 
   const results = [];
   let previousIp = null;
@@ -2200,7 +2215,7 @@ async function main() {
       while (!session) {
         sessionStartAttempt++;
         try {
-          session = await openBrowserWithRotatedIp(profileDir, proxyAuth, device, previousIp, sessionNumber);
+          session = await startProfileSession(previousIp, sessionNumber);
         } catch (e) {
           console.log(`--- Proxy session ${sessionNumber} start attempt ${sessionStartAttempt} failed: ${e.message}`);
           console.log(`--- Waiting ${Math.round(proxySessionRetryWaitMs / 1000)}s before retrying the same proxy session. Press Ctrl+C to stop. ---`);
@@ -2211,11 +2226,37 @@ async function main() {
       browser = session.browser;
       previousIp = session.ip;
 
-      // Warm up the persistent profile on every proxy session so trust
-      // (cookies, history, real browsing behaviour) accumulates over time.
-      await warmUpProfile(browser, proxyAuth, device, profileDir, sessionNumber);
-
       for (let i = batchStart; i < batchEnd; i++) {
+        // Rotation can happen during the pause between queries too. Check
+        // before another search and switch storage when an IP change is seen.
+        if (i > batchStart) {
+          let ready = false;
+          while (!ready) {
+            try {
+              if (browser) {
+                const observedIp = normalizeIp(await testProxyIp(browser, proxyAuth, device));
+                if (observedIp === session.ip) {
+                  ready = true;
+                  continue;
+                }
+                console.log('--- IP changed between queries; switching to its profile ---');
+                await browser.close();
+                browser = null;
+                session = await startProfileSession(null, sessionNumber, observedIp);
+              } else {
+                session = await startProfileSession(null, sessionNumber);
+              }
+              browser = session.browser;
+              previousIp = session.ip;
+              ready = true;
+            } catch (e) {
+              if (browser) await browser.close().catch(() => {});
+              browser = null;
+              console.log(`--- Profile/IP check failed (${e.name}); retrying the same query in ${Math.round(proxySessionRetryWaitMs / 1000)}s ---`);
+              await sleep(proxySessionRetryWaitMs);
+            }
+          }
+        }
         const query = queries[i];
         console.log(`\n========== QUERY ${i + 1}/${queries.length}: ${query} ==========`);
 
@@ -2228,7 +2269,7 @@ async function main() {
             : TRANSIENT_NET_ERRORS.test(e.message || '') ? 'network-error' : 'query-error');
         }
 
-        results.push({ query, ...outcome, ip: previousIp });
+        results.push({ query, ...outcome, ip: previousIp, profileId: session.profileId });
 
         if (i < batchEnd - 1) {
           const pause = rand(45000, 90000);

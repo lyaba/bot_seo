@@ -63,7 +63,7 @@ async function followSearchLink(page, link, targetDomain, device, { timeoutMs = 
 
 function formatVisitSummary(result) {
   const label = result.ok ? (result.source === 'search' ? 'SEARCH' : 'DIRECT') : 'FAIL';
-  return `${label} | ${result.ip || 'unknown-ip'} | ${result.query}${result.reason ? ' | ' + result.reason : ''}`;
+  return `${label} | ${result.ip || 'unknown-ip'} | ${result.query}${result.reason ? ' | ' + result.reason : ''}${result.profileId ? ' | profile=' + result.profileId : ''}`;
 }
 
 module.exports = { matchesTarget, failedVisit, arrivalResult, followSearchLink, formatVisitSummary };

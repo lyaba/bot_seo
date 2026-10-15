@@ -1,5 +1,21 @@
 # PROJECT_CONTEXT.md
 
+## IP profile publication and live results — 2026-10-15
+
+- User explicitly requested committing and pushing the current IP-profile implementation to `origin/main`; the prior rollback checkpoint remains `4e8550f`.
+- Confirmed from the user's completed imperator-kzn run: 8 queries, 7 `SEARCH` results with `new-tab-click`, 1 `DIRECT` with `target-not-found-in-scanned-results`, 0 `FAIL`. All 8 rows show distinct pre-query IPs and profile identifiers. This confirms observed switching/reporting for that run, not analytics classification or ranking effects.
+- The implementation's 27 local tests passed before this publication request. Current JavaScript syntax, whitespace and candidate-secret checks passed; no source logic changed since that validated version. Secret settings, profile data and CAPTCHA artifacts remain excluded from Git.
+
+## Separate persistent IP profiles — 2026-10-15
+
+- Confirmed prerequisite completed: checkpoint `4e8550fb2457ecf71a7dd57141d4f4ac21e14696` was committed and pushed successfully to `origin/main` before profile implementation. It includes all prior source changes/tests plus credential removal and CAPTCHA-dump ignore rule; local secret configs and browser data were excluded. Profile implementation remains in the working tree, not in this backup commit.
+- Added `bot-haibo/ip-profile.js`. Chromium data is now separated by project, device and normalized external IP at `.profiles/by-ip/<encoded-project>/<device>/ip-<sha256-prefix>/`. Returning IPs reuse their own directory. No cookies/history are copied between profiles. The original `.profiles/<project>` directories remain untouched; restoring the checkpoint reactivates the original scheme.
+- IP discovery/rotation uses a separate `.profiles/.proxy-check/<project>/<device>` browser, which closes before the selected profile opens. The selected profile's IP is checked at startup and after warm-up. Changes trigger profile reselection within a bounded attempt loop; startup failures retain the existing wait/retry behavior for the same session.
+- IP is checked between queries too; a detected change closes the current browser and starts/warms the matching profile before the next query. The summary now records `profile=ip-...`. The IP shown is the last verified pre-query IP: upstream rotation during an individual request cannot be prevented by this code.
+- New profiles must successfully visit at least one warm-up site before searching. `.warmed` is no longer created for zero successful visits; warm-up CAPTCHA pages and HTTP errors are not counted as successful visits. Existing warmed profiles can honor `HAIBO_WARM_SESSION=0`; new ones cannot bypass warm-up. This records browser activity, not a guarantee of human classification or search ranking effects.
+- Validation passed: all 27 tests via `node --test --test-timeout=60000 bot-haibo/test/*.test.js`, including real Chromium localStorage persistence/isolation across three launches, separate IP/project/device paths, IPv6 canonicalization, probe cleanup, IP changes at startup/after warm-up/between queries, disabled/failed warm-up, bounded retries and all previous search/visit tests. All browser requests were intercepted locally; synthetic storage only. Syntax and whitespace checks passed.
+- No live proxy sessions, searches, production profile migrations or paid CAPTCHA tasks were run for these changes. README documents behavior and a scoped source rollback command. Only the pre-change checkpoint was committed/pushed as requested.
+
 ## Backup before separate profiles — 2026-10-15
 
 - User explicitly requested a complete Git checkpoint and push before profile changes. Current branch: `main`; configured remote: `origin` (GitHub repository lyaba/bot_seo).
