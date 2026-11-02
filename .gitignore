@@ -12,3 +12,6 @@
 *.jpeg
 yandex_page_dump.html
 **/.captcha-screenshots/
+**/.venv/
+**/__pycache__/
+*.pyc

@@ -5,7 +5,12 @@ const path = require('path');
 const fs = require('fs');
 const proxies = require('./proxies');
 const { searchViaForm } = require('./search-input');
+const { readSearchPage, confirmedSearchPage, openResultsPage } = require('./search-pagination');
 const { normalizeIp, openIpProfileSession } = require('./ip-profile');
+const { runBoundedWarmVisit } = require('./warmup-guard');
+const { limitWarmupTraffic } = require('./warmup-traffic');
+const { captchaCleared, CAPTCHA_ALREADY_CLEARED, isNavigationContextError } = require('./captcha-state');
+const { prepareSiteBrowsing, collectVisibleInternalLinks, openInternalLink, pageKey, readScrollState } = require('./site-navigation');
 const { matchesTarget, failedVisit, arrivalResult, followSearchLink, formatVisitSummary } = require('./visit-result');
 
 puppeteer.use(StealthPlugin());
@@ -207,7 +212,6 @@ function buildStealthInitScript() {
   return () => {
     try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch {}
     try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 }); } catch {}
-    try { Object.defineProperty(navigator, 'maxTouchPoints', { get: () => (navigator.maxTouchPoints || 0) }); } catch {}
     try { Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] }); } catch {}
     try {
       Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -367,6 +371,7 @@ const BROWSER_LAUNCH_TIMEOUT_MS = Number(process.env.HAIBO_BROWSER_LAUNCH_TIMEOU
 const PROXY_SESSION_RETRY_WAIT_MS = Number(process.env.HAIBO_PROXY_SESSION_RETRY_WAIT_MS || 300000);
 
 async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3, imageB64 = null) {
+  if (await captchaCleared(captchaPage, 'before Python solver')) return CAPTCHA_ALREADY_CLEARED;
   console.log('  🧩 Solving captcha via Python/CapMonster...');
   
   const captchaUrl = captchaPage.url();
@@ -403,7 +408,7 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3, im
     }
   }
   
-  const pythonPath = '/usr/bin/python3';
+  const pythonPath = process.env.HAIBO_PYTHON || '/usr/bin/python3';
   const scriptPath = path.join(__dirname, 'solve_captcha.py');
   const solverTimeoutMs = 330000;
 
@@ -411,6 +416,7 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3, im
     throw new Error(`Captcha solver script not found: ${scriptPath}`);
   }
 
+  if (await captchaCleared(captchaPage, 'before solver preflight')) return CAPTCHA_ALREADY_CLEARED;
   const preflightArgs = ['-u', '-X', 'faulthandler', scriptPath, '--self-test', '--output', 'json'];
   if (proxyArg) {
     preflightArgs.push('--proxy', proxyArg);
@@ -430,6 +436,10 @@ async function solveCaptchaWithPython(captchaPage, proxyAuth, maxRetries = 3, im
   let lastError = null;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (await captchaCleared(captchaPage, 'before solver task/retry')) return CAPTCHA_ALREADY_CLEARED;
+    if (captchaPage.url() !== captchaUrl) {
+      throw new Error('CAPTCHA URL changed while preparing solver; task not started');
+    }
     console.log(`  Attempt ${attempt}/${maxRetries}...`);
     
     const args = ['-u', '-X', 'faulthandler', scriptPath, '--url', captchaUrl, '--output', 'json'];
@@ -748,7 +758,10 @@ async function authenticateIfNeeded(page, proxyAuth) {
 // to the Python solver (ImageToTextTask). showcaptchafast (passive check) is
 // handled by following retpath.
 async function solveCaptcha(page, proxyAuth, device = 'desktop', label = 'captcha') {
-  if (await tryClickCaptchaCheckbox(page, device)) return true;
+  if (await captchaCleared(page, 'before checkbox')) return true;
+  const checkboxPassed = await tryClickCaptchaCheckbox(page, device);
+  if (await captchaCleared(page, 'after checkbox/navigation')) return true;
+  if (checkboxPassed) console.log('  Checkbox redirected, but CAPTCHA is still active.');
 
   if (page.url().includes('showcaptchafast')) {
     const retpath = getCaptchaRetpath(page.url());
@@ -815,16 +828,22 @@ async function solveCaptcha(page, proxyAuth, device = 'desktop', label = 'captch
       }
     }
     return false;
+  }).catch(async error => {
+    if (isNavigationContextError(error) && await captchaCleared(page, 'during challenge inspection')) return null;
+    throw error;
   });
+  if (await captchaCleared(page, 'after challenge inspection')) return true;
 
   if (!hasImageChallenge) {
     // Checkbox/pow challenge with no real image: solve it LOCALLY (proof-of-work
     // computed in our own browser session). CapMonster is unreliable for
     // SmartCaptcha, so the Python solver is only the last resort here.
     console.log('  ↷ Checkbox/pow captcha without image challenge (empty imageSrc) — solving pow locally (CapMonster disabled for SmartCaptcha)');
-    if (await solveCaptchaLocally(page, label)) return true;
+    await solveCaptchaLocally(page, label);
+    if (await captchaCleared(page, 'after local solver/navigation')) return true;
     console.log('  ↷ Local pow solver failed — last-resort attempt via Python solver...');
     const token = await solveCaptchaWithPython(page, proxyAuth, 3, null);
+    if (token === CAPTCHA_ALREADY_CLEARED || await captchaCleared(page, 'before applying solver answer')) return true;
     if (!token) return false;
     console.log(`  🔑 Applying captcha solution to page... (token length: ${String(token).length})`);
     await applyCaptchaToken(page, token);
@@ -835,6 +854,7 @@ async function solveCaptcha(page, proxyAuth, device = 'desktop', label = 'captch
   console.log('  Checkbox stage failed — solving image captcha via Python solver...');
   const imageB64 = await getCaptchaImageBase64(page);
   const token = await solveCaptchaWithPython(page, proxyAuth, 3, imageB64);
+  if (token === CAPTCHA_ALREADY_CLEARED || await captchaCleared(page, 'before applying image answer')) return true;
   if (!token) return false;
   console.log('  🔑 Applying captcha solution to page...');
   await applyCaptchaToken(page, token);
@@ -989,15 +1009,66 @@ async function trySearchViaURL(query, browser, proxyAuth, device = 'desktop') {
  * Swipe using REAL touch events (touchStart/touchMove/touchEnd).
  */
 async function touchSwipe(page, fromX, fromY, toX, toY, steps = 6) {
+  let touch;
+  let failure;
+  let stage = 'touchStart';
   try {
-    await page.touchscreen.touchStart({ x: fromX, y: fromY });
+    touch = await page.touchscreen.touchStart(fromX, fromY);
+    stage = 'touchMove';
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      await page.touchscreen.touchMove({ x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t });
+      await touch.move(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t);
       await sleep(rand(16, 48));
     }
-    await page.touchscreen.touchEnd();
-  } catch {}
+    stage = 'touchEnd';
+    await touch.end();
+    touch = null;
+    return true;
+  } catch (error) {
+    failure = error;
+    console.log(`  Touch swipe failed at ${stage} (${error.name || 'Error'}): ${redactSensitive(error.message)}`);
+  } finally {
+    if (touch) await touch.end().catch(() => {});
+  }
+  if (failure?.name !== 'ProtocolError' || page.isClosed()) return false;
+
+  // Recover a desynchronised touch sequence through an independent CDP
+  // session. Keep native touch events; do not substitute JS scrolling.
+  let client;
+  try {
+    client = await page.createCDPSession();
+    stage = 'touchCancel';
+    try {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    } catch (error) {
+      // Cleanup may already have ended the failed gesture. Chromium rejects
+      // cancellation when no touch is active; that state is safe to restart.
+      if (!/Must send a TouchStart first/i.test(error.message || '')) throw error;
+    }
+    stage = 'enableTouch';
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+    const point = (x, y) => [{ x: Math.round(x), y: Math.round(y), id: 0, radiusX: 1, radiusY: 1, force: 0.5 }];
+    stage = 'touchStart';
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(fromX, fromY) });
+    stage = 'touchMove';
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t) });
+      await sleep(rand(16, 48));
+    }
+    stage = 'touchEnd';
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    console.log('  Touch swipe recovered with a fresh touch sequence');
+    return true;
+  } catch (error) {
+    console.log(`  Touch recovery failed at ${stage} (${error.name || 'Error'}): ${redactSensitive(error.message)}`);
+    return false;
+  } finally {
+    if (client) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }).catch(() => {});
+      await client.detach().catch(() => {});
+    }
+  }
 }
 
 /**
@@ -1032,27 +1103,30 @@ async function scrollToBottom(page, device = 'desktop') {
     for (let i = 0; i < rand(3, 6); i++) {
       const vp = page.viewport();
       const w = (vp && vp.width) || 390;
+      const h = (vp && vp.height) || 844;
       const startX = rand(w * 0.3, w * 0.7);
-      await touchSwipe(page, startX, rand(550, 700), startX + rand(-30, 30), rand(380, 480), rand(4, 7));
+      const ok = await touchSwipe(page, startX, rand(h * 0.7, h * 0.85), startX + rand(-30, 30), rand(h * 0.25, h * 0.4), rand(6, 10));
+      if (!ok) {
+        console.log('  Mobile scrolling stopped: touch input could not be recovered');
+        break;
+      }
       await sleep(rand(300, 700));
-      const atBottom = await page.evaluate(
-        () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 60
-      ).catch(() => true);
-      if (atBottom) break;
+      const state = await readScrollState(page, { x: startX, y: h * 0.55 });
+      if (state.atBottom) break;
     }
     return;
   }
-  await page.evaluate(async () => {
-    await new Promise(resolve => {
-      let last = 0;
-      const timer = setInterval(() => {
-        window.scrollBy(0, 200 + Math.random() * 200);
-        const h = document.body.scrollHeight;
-        if (h === last) { clearInterval(timer); resolve(); }
-        last = h;
-      }, 400);
-    });
-  });
+  // Bound reading even on infinite-scroll pages; use browser wheel events.
+  const viewport = page.viewport() || { width: 1200, height: 800 };
+  await page.mouse.move(viewport.width * 0.5, viewport.height * 0.55, { steps: 5 });
+  for (let i = 0; i < 16; i++) {
+    const before = await readScrollState(page);
+    const height = page.viewport()?.height || 800;
+    await page.mouse.wheel({ deltaY: rand(height * 0.45, height * 0.8) });
+    await sleep(rand(300, 700));
+    const state = await readScrollState(page);
+    if (state.atBottom || state.top === before.top) break;
+  }
 }
 
 const TRANSIENT_NET_ERRORS = /ERR_TUNNEL_CONNECTION_FAILED|ERR_CONNECTION_(RESET|CLOSED|TIMED_OUT)|ERR_NETWORK_CHANGED|ERR_PROXY_CONNECTION_FAILED|TimeoutError|Navigation timeout|Navigation failed because browser has disconnected/i;
@@ -1158,6 +1232,7 @@ async function tryClickCaptchaCheckbox(page, device = 'desktop') {
     return false;
   } catch (e) {
     console.log(`  Checkbox click error: ${e.message}`);
+    if (isNavigationContextError(e)) return await captchaCleared(page, 'checkbox interrupted by navigation');
     return false;
   }
 }
@@ -1557,42 +1632,46 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
     // Human-like: pause + scroll between pages, captcha check on each page.
     const MAX_PAGES = 7;
     let visitResult = null;
+    let scannedPages = 0;
+    let paginationFailure = null;
+    const firstSearchPage = await readSearchPage(activePage);
+    const searchBase = firstSearchPage.url;
+    const actualQuery = new URL(searchBase).searchParams.get('text');
+    if (!confirmedSearchPage(firstSearchPage, 1, actualQuery)) return failedVisit('initial-search-page-unconfirmed');
+    const seenResults = new Set([firstSearchPage.signature]);
 
     for (let pageNum = 1; pageNum <= MAX_PAGES && !visitResult; pageNum++) {
       if (pageNum > 1) {
-        console.log(`\n--- Checking page ${pageNum} of results ---`);
-        const base = activePage.url();
-        const urlWithPage = /[?&]page=\d+/.test(base)
-          ? base.replace(/([?&])page=\d+/, `$1page=${pageNum}`)
-          : `${base}${base.includes('?') ? '&' : '?'}page=${pageNum}`;
-
-        await gotoWithRetry(activePage, urlWithPage, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        await sleep(rand(2500, 5000));
-
-        if (isCaptchaPage(activePage.url())) {
-          console.log(`CAPTCHA on page ${pageNum}, trying checkbox click then image solver...`);
-          if (!(await solveCaptcha(activePage, proxyAuth, device, `page_${pageNum}`))) break;
-
-          // Captcha redirect may drop the &page=N param — restore it so we
-          // don't accidentally rescan page 1
-          if (pageNum > 1 && !/[?&]page=\d+/.test(activePage.url())) {
-            const base = activePage.url();
-            const sep = base.includes('?') ? '&' : '?';
-            await gotoWithRetry(activePage, `${base}${sep}page=${pageNum}`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-            await sleep(rand(2000, 4000));
+        console.log(`\n--- Opening results page ${pageNum} (p=${pageNum - 1}) ---`);
+        const next = await openResultsPage(activePage, searchBase, pageNum, {
+          seen: seenResults,
+          navigate: (page, url) => gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: 30000 }),
+          solveCaptcha: async page => {
+            await sleep(rand(2500, 5000));
+            if (!isCaptchaPage(page.url())) return true;
+            console.log(`CAPTCHA on page ${pageNum}, trying checkbox click then image solver...`);
+            return solveCaptcha(page, proxyAuth, device, `page_${pageNum}`);
           }
+        });
+        if (!next.ok) {
+          paginationFailure = next.reason;
+          console.log(`  Results page ${pageNum} not confirmed: ${next.reason}. Stopping pagination.`);
+          break;
         }
+        seenResults.add(next.state.signature);
 
         await scrollToBottom(activePage, device);
         await sleep(rand(1000, 2000));
       }
 
+      scannedPages++;
+      console.log(`--- Checking confirmed results page ${pageNum} ---`);
       visitResult = await findAndVisitTarget(activePage, targetDomain, device);
     }
 
     if (!visitResult) {
       // No target link found in the scanned pages; record a direct fallback.
-      console.log(`\n--- Target not found in top ${MAX_PAGES} pages, navigating directly ---`);
+      console.log(`\n--- Target not found in ${scannedPages} confirmed results pages${paginationFailure ? `; ${paginationFailure}` : ''}, navigating directly ---`);
 
       // Mobile proxy tunnels occasionally drop CONNECT — retry once
       let navOk = false;
@@ -1612,7 +1691,7 @@ async function runSearchAndVisit(browser, proxyAuth, searchQuery, targetDomain, 
       console.log('=== RESULT ===');
       console.log('Final URL:', finalUrl);
       visitResult = navOk
-        ? await arrivalResult(activePage, targetDomain, 'direct', 'target-not-found-in-scanned-results')
+        ? await arrivalResult(activePage, targetDomain, 'direct', paginationFailure || 'target-not-found-in-scanned-results')
         : failedVisit('direct-navigation-failed');
       console.log('Target domain reached:', visitResult.ok ? 'YES' : 'NO');
       console.log('Visit source:', visitResult.ok ? visitResult.source : 'FAIL', '|', visitResult.reason);
@@ -1857,9 +1936,7 @@ const WARM_NEUTRAL_SITES = [
   'https://ya.ru/',
   'https://yandex.ru/pogoda/',
   'https://yandex.ru/pogoda/msk',
-  'https://yandex.ru/news',
   'https://auto.ru/cars/new/',
-  'https://www.kinopoisk.ru/lists/pick/',
   'https://ru.wikipedia.org/wiki/Автомобиль',
   'https://yandex.ru/maps/',
 ];
@@ -1901,60 +1978,64 @@ function shuffleArray(arr) {
  * pauses, idle reads, click a visible organic link and dwell on it.
  */
 async function warmVisitPage(browser, proxyAuth, url, device, index, total) {
-  const page = await browser.newPage();
-  await humanizePage(page, device);
-  await authenticateIfNeeded(page, proxyAuth);
-  let hitCaptcha = false;
   warmVisitPage._lastHitCaptcha = false;
-  try {
-    const response = await gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  const configuredBudget = Number(process.env.HAIBO_WARM_SITE_MAX_MS || 60000);
+  const timeoutMs = Number.isFinite(configuredBudget) && configuredBudget >= 1000
+    ? Math.min(configuredBudget, 300000) : 60000;
+  console.log(`  [warm ${index}/${total}] opening ${url} (budget ${Math.round(timeoutMs / 1000)}s)`);
+  return await runBoundedWarmVisit(browser, async (page, step) => {
+    await step('page-setup', () => humanizePage(page, device));
+    await step('proxy-auth', () => authenticateIfNeeded(page, proxyAuth));
+    await step('traffic-filter', () => limitWarmupTraffic(page));
+    const response = await step('navigation', () => gotoWithRetry(page, url, { waitUntil: 'domcontentloaded', timeout: Math.min(20000, timeoutMs) }, 1));
     if (response && !response.ok()) throw new Error('Warm-up page returned an HTTP error');
     console.log(`  [warm ${index}/${total}] ${url}`);
-    await sleep(rand(2500, 5000));
+    await step('pause', () => sleep(rand(2500, 5000)));
     if (isCaptchaPage(page.url())) {
-      hitCaptcha = true;
       warmVisitPage._lastHitCaptcha = true;
       console.log(`  [warm ${index}/${total}] captcha wall at ${page.url().substring(0, 80)} — exit IP is dirty`);
       return false;
     }
-    await humanActivity(page, device);
-    await scrollToBottom(page, device);
-    await sleep(rand(1500, 3500));
+    await step('activity', () => humanActivity(page, device));
+    await step('scroll', () => scrollToBottom(page, device));
+    await step('pause', () => sleep(rand(1500, 3500)));
 
-    const link = await page.evaluate(() => {
+    const link = await step('collect-link', () => page.evaluate(() => {
       const nodes = Array.from(document.querySelectorAll('a[href^="http"]'));
       for (const el of nodes) {
+        const destination = new URL(el.href);
+        if (/(^|\.)(dzen\.ru|kinopoisk\.ru|rythm\.yandex\.ru)$/.test(destination.hostname) ||
+          (/(^|\.)yandex\.ru$/.test(destination.hostname) && /^\/rythm(?:\/|$)/i.test(destination.pathname)) ||
+          /\/(video|reels?|shorts?)(\/|$)/i.test(destination.pathname)) continue;
         const r = el.getBoundingClientRect();
         if (r.width > 0 && r.height > 0 && r.top > 80 && r.top < window.innerHeight) {
           return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), href: el.href };
         }
       }
       return null;
-    }).catch(() => null);
+    }).catch(() => null));
 
     if (link) {
       console.log(`  [warm ${index}/${total}] click → ${link.href.substring(0, 80)}`);
       if (device === 'mobile') {
-        await page.touchscreen.tap(link.x, link.y).catch(() => {});
+        await step('tap', () => page.touchscreen.tap(link.x, link.y).catch(() => {}));
       } else {
-        await page.mouse.move(link.x, link.y, { steps: rand(8, 16) }).catch(() => {});
-        await sleep(rand(120, 360));
-        await page.mouse.click(link.x, link.y, { delay: rand(60, 140) }).catch(() => {});
+        await step('mouse-move', () => page.mouse.move(link.x, link.y, { steps: rand(8, 16) }).catch(() => {}));
+        await step('pause', () => sleep(rand(120, 360)));
+        await step('click', () => page.mouse.click(link.x, link.y, { delay: rand(60, 140) }).catch(() => {}));
       }
-      await sleep(rand(3000, 7000));
-      await humanActivity(page, device);
-      await scrollToBottom(page, device).catch(() => {});
-      await sleep(rand(1500, 3000));
-      await page.goBack({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-      await sleep(rand(1200, 2500));
+      await step('pause', () => sleep(rand(3000, 7000)));
+      await step('activity', () => humanActivity(page, device));
+      await step('scroll', () => scrollToBottom(page, device).catch(() => {}));
+      await step('pause', () => sleep(rand(1500, 3000)));
+      await step('back', () => page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {}));
+      await step('pause', () => sleep(rand(1200, 2500)));
     }
     return true;
-  } catch (e) {
-    console.log(`  [warm ${index}/${total}] skipped ${url}: ${e.message}`);
-    return false;
-  } finally {
-    await page.close().catch(() => {});
-  }
+  }, {
+    timeoutMs,
+    log: message => console.log(`  [warm ${index}/${total}] ${url}: ${redactSensitive(message, [proxyAuth?.username, proxyAuth?.password])}`),
+  });
 }
 
 function warmEnabled() {
@@ -2331,12 +2412,18 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
 
   let targetLink = null;
   let foundUrl = '';
+  const visibleHref = link => link.evaluate(el => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility === 'visible' && style.opacity !== '0'
+      ? el.href : '';
+  }).catch(() => '');
 
   for (const sel of selectors) {
     const links = await page.$$(sel);
     console.log(`  Selector "${sel}" -> ${links.length} links`);
     for (const link of links) {
-      const href = await page.evaluate(el => el.href, link);
+      const href = await visibleHref(link);
       if (href && matchesTarget(href, targetDomain)) {
         targetLink = link;
         foundUrl = href;
@@ -2351,7 +2438,7 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
     console.log('  Trying all <a> tags...');
     const allLinks = await page.$$('a[href]');
     for (const link of allLinks) {
-      const href = await page.evaluate(el => el.href, link);
+      const href = await visibleHref(link);
       if (href && matchesTarget(href, targetDomain)) {
         targetLink = link;
         foundUrl = href;
@@ -2383,12 +2470,14 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
 
     const searchPage = page;
     let outcome = { page, result: failedVisit('text-url-only') };
-    if (targetLink) {
-      console.log('--- Clicking target link ---');
-      outcome = await followSearchLink(page, targetLink, targetDomain, device);
-      page = outcome.page;
-    }
     try {
+      if (targetLink) {
+        console.log('--- Clicking target link ---');
+        outcome = await followSearchLink(page, targetLink, targetDomain, device);
+        if (outcome.diagnostic) console.log(`  Search click detail: ${redactSensitive(outcome.diagnostic)}`);
+        page = outcome.page;
+        if (page !== searchPage) await humanizePage(page, device);
+      }
       if (!outcome.result.ok) {
         const reason = outcome.result.reason;
         console.log(`  Search click not confirmed (${reason}); opening target directly.`);
@@ -2407,13 +2496,16 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
       console.log('Visit source:', outcome.result.ok ? outcome.result.source : 'FAIL', '|', outcome.result.reason);
       if (!outcome.result.ok) return outcome.result;
 
+      // End click tracking before internal browsing opens its own popups.
+      if (outcome.dispose) await outcome.dispose(true);
       await page.screenshot({ path: `./${targetDomain}_from_yandex.png`, fullPage: true }).catch(() => {});
       await visitSite(page, targetDomain, device).catch(() => {
         console.log('  Target reached; subsequent site browsing failed.');
       });
       return outcome.result;
     } finally {
-      // Close a target popup after browsing so it cannot leak into later queries.
+      // The click guard also closes delayed popups after a direct fallback.
+      if (outcome.dispose) await outcome.dispose();
       if (page !== searchPage) await page.close().catch(() => {});
     }
   }
@@ -2421,140 +2513,87 @@ async function findAndVisitTarget(page, targetDomain, device = 'desktop') {
 
 async function visitSite(page, targetDomain, device = 'desktop') {
   const domainsToMatch = buildDomains(targetDomain);
-  // Human-like browsing on the target site
-  await sleep(rand(2000, 4000));
-  await humanActivity(page, device);
-  await scrollToBottom(page, device);
-  await sleep(rand(1500, 3000));
-
   console.log('--- Browsing target site ---');
+  await sleep(rand(2000, 4000));
+  const preparation = await prepareSiteBrowsing(page, targetDomain, device);
+  if (preparation !== 'not-needed') console.log(`  Site browsing preparation: ${preparation}`);
+  if (!['not-needed', 'pickup-selected'].includes(preparation)) return { confirmed: 0, clicks: 0, directOpens: 0 };
 
-  let clickedCount = 0;
   const visited = new Set([page.url()]);
-  const maxClicks = rand(2, 5);
+  const attempted = new Set();
+  const maxPages = rand(2, 5);
+  let confirmed = 0;
+  let clicks = 0;
+  let directOpens = 0;
+  const readPage = async () => {
+    const before = await readScrollState(page);
+    await humanActivity(page, device);
+    await scrollToBottom(page, device);
+    await sleep(rand(2500, 6000));
+    const after = await readScrollState(page);
+    console.log(`  Page scroll position: ${Math.round(before.top)} -> ${Math.round(after.top)} (range ${Math.round(after.max)})`);
+  };
+  await readPage();
 
-  // Re-collect fresh link handles every round: element handles die after
-  // navigation ("same JavaScript world" errors), so never reuse them.
-  for (let round = 0; round < maxClicks + 2 && clickedCount < maxClicks; round++) {
-    let candidates = [];
-    try {
-      candidates = await collectInternalLinkCandidates(page, domainsToMatch, visited);
-
-      if (!candidates.length && round === 0) {
-        await tryOpenMobileMenu(page, device);
-        candidates = await collectInternalLinkCandidates(page, domainsToMatch, visited);
-      }
-
-      if (!candidates.length) {
-        candidates = await collectInternalFallbackUrls(page, domainsToMatch, visited);
-        if (candidates.length) {
-          console.log(`  Found ${candidates.length} internal fallback URLs via ${candidates[0].source}`);
-        }
-      }
-    } catch (e) {
-      break;
+  for (let round = 0; round < maxPages + 3 && confirmed < maxPages; round++) {
+    let candidates = await collectVisibleInternalLinks(page, targetDomain, [...visited, ...attempted]);
+    if (!candidates.length && round === 0) {
+      await tryOpenMobileMenu(page, device);
+      candidates = await collectVisibleInternalLinks(page, targetDomain, [...visited, ...attempted]);
     }
-
+    if (!candidates.length) candidates = await collectInternalFallbackUrls(page, domainsToMatch, new Set([...visited, ...attempted]));
     if (!candidates.length) {
-      console.log('  No internal links found for browsing on this page');
+      console.log('  No unvisited internal pages available');
       break;
     }
-
-    // Pick one of the first few candidates (humans click what they see first)
     const chosen = candidates[Math.floor(Math.random() * Math.min(candidates.length, 4))];
-    const chosenHref = typeof chosen === 'string' ? chosen : chosen.href;
-    const chosenSource = typeof chosen === 'string' ? 'dom-link' : chosen.source;
-
-    // Fresh handle for this round only
-    let handle = null;
-    if (chosenSource === 'dom-link') {
-      try {
-        for (const el of await page.$$('a[href]')) {
-          const href = await page.evaluate(e => {
-            try {
-              const url = new URL(e.getAttribute('href'), window.location.href);
-              url.hash = '';
-              return url.href;
-            } catch {
-              return e.href;
-            }
-          }, el).catch(() => null);
-          if (href === chosenHref) { handle = el; break; }
-        }
-      } catch (e) {
+    attempted.add(chosen.href);
+    const before = pageKey(page.url());
+    const sourcePage = page;
+    try {
+      const state = await prepareSiteBrowsing(page, targetDomain, device);
+      if (!['not-needed', 'pickup-selected'].includes(state)) {
+        console.log(`  Browsing stopped: ${state}`);
         break;
       }
-    }
-
-    try {
-      console.log(`  ${handle ? 'Clicking internal link' : 'Opening internal page'}: ${chosenHref}`);
-
-      if (!handle) {
-        await sleep(rand(700, 1400));
-        await gotoWithRetry(page, chosenHref, { waitUntil: 'domcontentloaded', timeout: 30000 }, 2);
+      let result;
+      if (chosen.source === 'dom-link') {
+        console.log(`  Clicking internal link: ${chosen.href}`);
+        result = await openInternalLink(page, chosen.href, targetDomain, device);
       } else {
-        // Bring the link into view first — off-screen links have no bounding box
-        await handle.evaluate(elem => elem.scrollIntoView({ block: 'center' })).catch(() => {});
-        await sleep(rand(400, 900));
-
-        const box = await handle.boundingBox();
-        let clickAction;
-        if (device === 'mobile' && box) {
-          // Real touch tap (no mouse on phones)
-          await sleep(rand(300, 700));
-          clickAction = page.touchscreen.tap(
-            box.x + box.width * rand(35, 65) / 100,
-            box.y + box.height * rand(35, 65) / 100
-          );
-        } else if (box) {
-          // Human click: hover, then click a random point inside the link
-          await page.mouse.move(
-            box.x + box.width * rand(30, 70) / 100,
-            box.y + box.height * rand(35, 65) / 100,
-            { steps: rand(8, 16) }
-          );
-          await sleep(rand(300, 700));
-
-          clickAction = page.mouse.click(
-            box.x + box.width * rand(35, 65) / 100,
-            box.y + box.height * rand(35, 65) / 100,
-            { delay: rand(50, 130) }
-          );
-        } else {
-          // Hidden/unmeasurable element — JS click keeps the referrer and
-          // skips Puppeteer's visibility checks that fail on mobile layouts
-          clickAction = handle.evaluate(elem => elem.click()).catch(() => {});
-        }
-
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
-          clickAction
-        ]);
+        console.log(`  Opening discovered page (${chosen.source}): ${chosen.href}`);
+        await gotoWithRetry(page, chosen.href, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
+        const arrival = await arrivalResult(page, targetDomain, 'direct');
+        result = { ok: arrival.ok && before !== pageKey(page.url()), reason: 'direct-page-not-reached' };
       }
-
-      visited.add(chosenHref);
+      if (!result.ok) {
+        console.log(`  Internal transition not confirmed: ${result.reason}`);
+        if (!matchesTarget(page.url(), targetDomain)) break;
+        continue;
+      }
+      if (result.page) page = result.page;
+      confirmed++;
+      if (chosen.source === 'dom-link') clicks++; else directOpens++;
+      visited.add(chosen.href);
       visited.add(page.url());
-      clickedCount++;
-      console.log(`  Navigated to: ${page.url().substring(0, 90)}`);
-
-      // Read the page like a human before moving on
-      await sleep(rand(2500, 6000));
-      await humanActivity(page, device);
-      await scrollToBottom(page, device);
-      await sleep(rand(1500, 3500));
-
-      await page.screenshot({ path: `./${targetDomain.replace(/\./g, '_')}_page_${clickedCount}.png`, fullPage: true }).catch(() => {});
-    } catch (e) {
-      console.log(`  Link click failed: ${e.message}`);
-      visited.add(chosenHref);
+      console.log(`  Confirmed internal page: ${page.url()}`);
+      await sleep(rand(1500, 3000));
+      await readPage();
+      await page.screenshot({ path: `./${targetDomain.replace(/\./g, '_')}_page_${confirmed}.png`, fullPage: true }).catch(() => {});
+    } catch (error) {
+      console.log(`  Internal browsing step failed (${error.name || 'Error'}): ${redactSensitive(error.message)}`);
+      if (!matchesTarget(page.url(), targetDomain)) break;
+    } finally {
+      if (page !== sourcePage) {
+        await page.close().catch(() => {});
+        page = sourcePage;
+      }
+      await page.bringToFront().catch(() => {});
     }
   }
-
-  // Final screenshot
-  await sleep(rand(2000, 3000));
   await page.screenshot({ path: `./${targetDomain.replace(/\./g, '_')}_final.png`, fullPage: true }).catch(() => {});
-  console.log(`Final screenshot saved: ${targetDomain.replace(/\./g, '_')}_final.png`);
-  console.log('Total internal links clicked:', clickedCount);
+  console.log(`Confirmed internal pages: ${confirmed} | link clicks: ${clicks} | direct opens: ${directOpens}`);
+  return { confirmed, clicks, directOpens };
 }
 
 main().catch(e => {

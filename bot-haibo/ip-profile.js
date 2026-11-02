@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 const { createHash } = require('node:crypto');
+const { closeBrowserBounded } = require('./warmup-guard');
 
 function normalizeIp(value) {
   const ip = String(value || '').trim();
@@ -29,7 +30,7 @@ async function openIpProfileSession({ root, projectName, device, initialIp,
   if (!ip) {
     const probeSession = await probe();
     try { ip = normalizeIp(probeSession.ip); }
-    finally { await probeSession.browser.close(); }
+    finally { await closeBrowserBounded(probeSession.browser); }
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -62,7 +63,7 @@ async function openIpProfileSession({ root, projectName, device, initialIp,
       delivered = true;
       return { browser, ip: profile.ip, profileId: profile.id, profileDir: profile.dir };
     } finally {
-      if (browser && !delivered) await browser.close().catch(() => {});
+      if (browser && !delivered) await closeBrowserBounded(browser);
     }
   }
   throw new Error('IP kept changing during profile startup/warm-up; retry this session later');

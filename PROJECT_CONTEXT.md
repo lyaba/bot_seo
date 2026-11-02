@@ -1,5 +1,324 @@
 # PROJECT_CONTEXT.md
 
+## GitHub delivery and server setup — 2026-11-02
+
+- User explicitly requested committing and pushing all accumulated project changes so the server can pull them, including a request for keys. Credentials remain excluded under project instructions; no secret values are committed, displayed or copied to deployment artifacts.
+- Confirmed branch main and origin https://github.com/lyaba/bot_seo.git; fetch completed and local HEAD matched origin/main before this delivery. Current registry contains 11 projects.
+- Added Linux server install/update instructions in README.md, including npm ci, Python venv with requests, Chromium installation, one-time local proxy/CapMonster settings and headless launch. Runtime settings .env and config/captcha.json are ignored and preserved by normal pulls.
+- Added HAIBO_PYTHON interpreter override while retaining /usr/bin/python3 as default; updated the isolated CAPTCHA-flow test to check the selected venv interpreter. Added ignored Python venv/bytecode paths and documented HAIBO_HEADLESS in the environment template.
+- Validation: all 76 tests passed via node --test --test-timeout=60000 bot-haibo/test/*.test.js, including local Chromium fixtures; syntax checks and staged whitespace checks passed. Exact-value scan found no local proxy credentials or configured CAPTCHA secrets in tracked/nonignored files.
+- Server access was not supplied; no server deployment or production restart performed. Git pull alone cannot provision secrets/dependencies or restart a running process.
+
+
+## Authorized profile cache cleanup — 2026-11-02
+
+- User requested profile cache cleanup. Found 617 Chromium profiles under bot-haibo/.profiles; removed 471 recognized HTTP/code/GPU/Dawn/Service Worker cache directories from 67 inactive profiles, totaling 2,393,968,640 allocated file bytes (approximately 2.23 GiB).
+- Repeated process user-data-dir and Singleton marker checks skipped 15 profiles conservatively. No processes stopped or restarted.
+- Before/after inode/size/mtime comparisons confirmed 12,321 non-cache files unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB preserved.
+- Profile allocation decreased from 5,056,140 KiB to 2,724,716 KiB (approximately 2.60 GiB). Data volume afterward reported 6,633,412 KiB available (approximately 6.33 GiB). Skipped-profile caches remain and caches can regrow. No application/config edits, commit or push.
+
+
+## Horgos TargetCloseError diagnosis — 2026-11-01
+
+- User supplied a crash log: target link found on results page 2, no loaded target document within 15s and zero observed click popups, direct fallback announced, then TargetCloseError for Network.setUserAgentOverride in stealth user-agent-override onPageCreated.
+- Installed plugin source confirms its CDP client.send call at line 182 is neither awaited nor returned/caught. A rejected command can escape the plugin framework's surrounding async try/catch and terminate Node as an unhandled rejection when the page/session closes.
+- followSearchLink closes owned popups during fallback and closes late popups while fallback is active, providing a possible race with plugin initialization. The supplied log does not establish which target closed or who closed it; initial click timeout cause remains unknown. No demonstrated connection to profile-cache cleanup. No application/dependency changes or restart performed.
+
+## Authorized profile cache cleanup — 2026-11-01
+
+- User requested profile cache cleanup. Found 552 Chromium profiles under bot-haibo/.profiles; removed 346 recognized HTTP/code/GPU/Dawn/Service Worker cache directories from 49 inactive profiles, totaling 1,736,327,168 allocated file bytes (approximately 1.62 GiB).
+- Sanitized process inspection found no browser using these profiles initially. Repeated process and Singleton marker checks skipped 14 profiles conservatively. No processes stopped or restarted.
+- Before/after inode/size/mtime comparisons confirmed 9,201 non-cache files unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB preserved.
+- Profile allocation decreased from 4,043,000 KiB to 2,347,368 KiB (approximately 2.24 GiB). Data volume afterward reported approximately 5.95 GiB available. Skipped-profile caches remain and caches can regrow. No application/config edits, commit or push.
+
+## Market CAPTCHA click diagnosis — 2026-11-01
+
+- User supplied a screenshot of market.yandex.ru/showcaptcha showing the SmartCaptcha checkbox and asked why the bot does not click it.
+- Source inspection confirms tryClickCaptchaCheckbox searches only the top-level document for #js-button.CheckboxCaptcha-Button. solveCaptcha is called from search handling and search pagination, not from visitSite or warmVisitPage. Warm-up exits on an initial CAPTCHA and does not check/solve a CAPTCHA after its incidental outgoing-link click.
+- The screenshot alone does not establish which execution branch opened Market, whether the checkbox matches that selector, or whether it is inside an iframe. No live CAPTCHA interaction or application/config changes performed.
+
+## Authorized profile cache cleanup — 2026-10-31
+
+- User requested profile cache cleanup. Discovered 505 Chromium profiles under bot-haibo/.profiles; removed 300 recognized HTTP/code/GPU/Dawn/Service Worker cache directories from 37 inactive profiles, totaling 1,618,800,640 allocated file bytes (approximately 1.51 GiB).
+- Sanitized process inspection initially found no browser using these profiles. Repeated process and Singleton marker checks skipped 25 active or locked profiles conservatively. No process stopped or restarted.
+- Before/after inode/size/mtime comparisons confirmed 6,851 non-cache files unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved.
+- Profile allocation decreased from 3,748,628 KiB to 2,151,384 KiB (approximately 2.05 GiB). Data volume afterward reported approximately 6.43 GiB available. Active/locked caches remain and caches can regrow. No application/config edits, commit or push.
+
+## Horgos Auto launch command confirmed — 2026-10-30
+
+- User asked how to launch Horgos Auto. Confirmed registry key horgos-auto, target horgos-auto.com, 49 queries, mobile mode and existing bot-haibo/node_modules.
+- From repository root run `node bot-haibo/yandex_search_visit.js --project horgos-auto`; existing helper `bash bot-haibo/horgos-auto.sh` runs the same project. Bot was not launched or restarted.
+
+## Authorized profile cache cleanup — 2026-10-30
+
+- User requested profile cache cleanup. Discovered 470 profiles under bot-haibo/.profiles; removed 134 recognized Chromium HTTP/code/GPU/Dawn/Service Worker cache directories from 17 inactive profiles, totaling 547,659,776 allocated file bytes (approximately 522 MiB).
+- Process inspection found no browser using these profiles initially; repeated process and Singleton marker checks during cleanup skipped 11 active or locked profiles conservatively. No process stopped or restarted.
+- Before/after inode/size/mtime comparison confirmed 3,054 non-cache files unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved.
+- Profile allocation decreased from 2,513,388 KiB to 1,978,564 KiB (approximately 1.89 GiB). Data volume afterward reported 160 MiB available at 100% capacity. Active/locked caches remain and cache can regrow. No application/config edits, commit or push.
+
+## User Library cache inspection — 2026-10-29
+
+- User asked what occupies /Users/mac/Library/Caches; read-only du measured 5,298,584 KiB (approximately 5.05 GiB) in accessible directories. Some protected Apple cache directories denied access, so their sizes are excluded.
+- Largest directories: ms-playwright-mcp 2,735,640 KiB (14 mcp-chrome-* directories), Google 1,202,432 KiB (Chrome 1,201,140 KiB), Homebrew 440,648 KiB, termius-updater 359,084 KiB, JetBrains 176,008 KiB. This is separate from bot-haibo/.profiles cleaned earlier. No Library cache files deleted or processes stopped.
+
+
+## Authorized profile cache cleanup — 2026-10-29
+
+- User requested profile cache cleanup. Found 456 profiles under bot-haibo/.profiles; removed 733 recognized Chromium HTTP/code/GPU/Dawn/Service Worker cache directories from 124 inactive profiles, totaling 3,666,169,856 allocated file bytes (approximately 3.41 GiB).
+- Repeated process user-data-dir and Singleton marker checks before deletion; skipped 11 profiles with active or lock indicators conservatively. No process stopped or restarted.
+- Before/after inode/size/mtime comparisons confirmed 22,443 non-cache files unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved.
+- Profile allocation decreased from 5,522,472 KiB to 1,942,228 KiB (approximately 1.85 GiB). Data volume afterward reported 2.5 GiB available at 99% capacity. Active/locked-profile caches remain and cache can regrow. No application/config edits, commit or push.
+
+
+## Imperator launch command confirmed — 2026-10-29
+
+- User asked how to launch “шьзукфещк”, interpreted as imperator typed using the Russian keyboard layout. Confirmed registry key imperator-kzn, target imperator-kzn.ru, 11 queries, mobile mode and existing bot-haibo/node_modules.
+- From repository root run `node bot-haibo/yandex_search_visit.js --project imperator-kzn`. Bot was not started or restarted.
+
+## Haibomotor launch command confirmed — 2026-10-28
+
+- User asked how to launch haibomotor. Confirmed the registry contains haibomotor (haibomotor.ru), six queries and mobile device mode; bot-haibo/node_modules exists.
+- Run from repository root: `cd bot-haibo` then `node yandex_search_visit.js --project haibomotor`. This inspection did not launch or restart the bot.
+
+## Authorized profile cache cleanup — 2026-10-28
+
+- User requested profile cache cleanup. Confirmed 370 profiles under bot-haibo/.profiles; profile allocation immediately before deletion was 3,875,360 KiB. Data volume initially reported 2.2 GiB available at 99% capacity. Sanitized process inspection confirmed one running bot and an active browser profile.
+- Removed 313 recognized Chromium HTTP/code/GPU/Dawn/Service Worker cache directories from 39 inactive profiles, totaling 2,434,027,520 allocated file bytes (approximately 2.27 GiB). Repeated process and Singleton marker checks before each profile cleanup; skipped 21 active or locked profiles conservatively, without determining whether each marker was stale. No process stopped or restarted.
+- Before/after inode/size/mtime comparison confirmed 7,090 non-cache files in cleaned profiles unchanged. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved. Final profile allocation was 1,502,736 KiB (approximately 1.43 GiB); Data volume reported 4.5 GiB available at 98% capacity. Active/locked caches remain and cache can regrow. No application/config changes, commit or push.
+
+## Warm-up Rythm alternate URL and query failure — 2026-10-27
+
+- User log confirms warm-up clicked yandex.ru/rythm/businesses/@demiand.ru, which bypassed the previously added rythm.yandex.ru host-only restriction. Extended warm-up request and outgoing-link filters to block /rythm paths on yandex.ru and its subdomains; retained other Yandex paths. Updated existing blocked-host test with the observed alternate route and www variant; focused test and syntax checks passed. Applies on next process start; no restart.
+- Log shows warm-up first site exceeded its 60s budget, followed by a touch TargetCloseError; other sites continued and warm-up completed 3/4. CAPTCHA was cleared; target link found, click arrival unconfirmed, direct navigation failed three times with ERR_TUNNEL_CONNECTION_FAILED. This confirms a proxy tunnel failure for target navigation, not its underlying cause or a connection to Rythm blocking.
+- Source confirms failed query outcomes are recorded and followed by a 45–90s pause before the next query, then an IP/proxy check. A failed between-query check retries after the configured wait (default 300s), retaining the next query. User excerpt alone does not confirm whether query 2 actually started.
+
+
+## Rythm blocked during warm-up — 2026-10-27
+
+- User authorized temporarily blocking rythm.yandex.ru during warm-up to reduce proxy traffic, with possible rollback if CAPTCHAs become more frequent. Added the domain and its subdomains to both the warm-up request blocker (warmup-traffic.js) and warm-up outgoing-link filter (yandex_search_visit.js).
+- Updated the existing blocked-host test with Rythm main/subdomain cases; focused test and both changed JavaScript syntax checks passed. No live traffic/CAPTCHA comparison performed, so savings and CAPTCHA impact remain unmeasured. No bot restart, commit or push; change applies on next process start.
+
+
+## Warm-up traffic inspection — 2026-10-27
+
+- User asked whether avoiding rythm.yandex.ru/businesses during warm-up would save proxy traffic. Current WARM_NEUTRAL_SITES contains ya.ru, two Yandex Weather URLs, Auto.ru, Wikipedia and Yandex Maps; Rythm is not explicitly listed.
+- warmVisitPage applies limitWarmupTraffic before navigation. The filter blocks resourceType media, common audio/video file extensions, and dzen.ru/kinopoisk.ru domains. Rythm is not explicitly blocked in the request or warm-up link filters; an incidental link or redirect remains possible but was not observed or reproduced.
+- No per-site traffic measurement was performed. The supplied Rythm page was inaccessible through the web tool. No application/config changes or bot restart.
+
+
+## Authorized profile cache cleanup — 2026-10-27
+
+- User requested clearing accumulated profile caches. Read-only inspection found 329 profiles, approximately 1.90 GiB of recognized Chromium caches and 1.1 GiB free on the Data volume.
+- Removed 278 recognized HTTP/code/GPU/Dawn/Service Worker cache directories from 34 inactive profiles strictly under bot-haibo/.profiles, totaling 1,770,942,464 allocated file bytes (1.65 GiB). Process user-data-dir checks and Singleton marker checks repeated before deletion; four active or locked profiles were skipped. No process was stopped or restarted.
+- Before/after inode/size/mtime comparison of 6,085 non-cache files found zero changes. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved.
+- Profiles allocation measured 2,919,964 KiB immediately before cleanup and 1,199,080 KiB afterward (approximately 1.14 GiB). Data volume afterward reported 3.5 GiB available at 99% capacity. Active/locked-profile caches remain and caches can regrow. No application/config edits, commit or push.
+
+
+## Repeat authorized profile cache cleanup — 2026-10-22
+
+- User requested clearing accumulated profile caches. Initial inspection measured bot-haibo/.profiles at 2,322,676 KiB; immediately before cleanup it was 2,337,472 KiB. Data volume had 3.7 GiB available at 99% capacity. One bot process was running; initial process inspection found no browser using these profiles.
+- Discovered 294 profiles, including 34 with recognized cache directories. Removed 270 recognized Chromium HTTP/code/GPU/Dawn/Service Worker cache directories strictly inside bot-haibo/.profiles, totaling 1,397,547,008 allocated file bytes (1.30 GiB). Process and SingletonLock checks were repeated before deletion; one active or locked profile was skipped. No process was stopped or restarted.
+- Before/after inode/size/mtime checks of 6,061 non-cache files in cleaned profiles found zero changes. Cookies, history, warm-up markers, Local Storage and IndexedDB were preserved.
+- Final profiles allocation was 972,684 KiB (approximately 950 MiB); Data volume reported 5.0 GiB available at 98% capacity. Active profile cache can remain and cache can regrow. No application/config edits, commit or push.
+
+
+## Search pagination repair — 2026-10-22
+
+- User authorized fixing the repeated-first-page defect. Added bot-haibo/search-pagination.js and integrated it into runSearchAndVisit. Browser URLs now use zero-based p=1..6 for displayed pages 2..7, remove the obsolete page parameter and retain the original search path/query/region as the navigation base.
+- Each page must have the requested p index, the same search query, a loaded results document without CAPTCHA, and a results signature not previously scanned. Network/HTTP failures, wrong-page redirects and repeated results stop pagination with an explicit reason. CAPTCHA clearance that returns to another page triggers one restoration of the original requested URL, including after a CAPTCHA HTTP 403. Existing solver algorithms remain unchanged.
+- Logs count only confirmed scanned pages. Existing direct fallback remains DIRECT, with the pagination failure reason when relevant, instead of claiming all seven pages were searched. Initial results must also be confirmed before scanning. Updated README and the existing query-flow regression to use a realistic search URL.
+- All 76 tests passed via node --test --test-timeout=60000 bot-haibo/test/*.test.js with isolated Chromium outside the sandbox. Nine new pagination tests cover mobile/desktop page 2, p indices through page 7, original URL parameters, repeated content despite changed URLs, wrong-page redirects, network/HTTP failures, CAPTCHA restoration (including 403), rejection of wrong queries, and the actual query flow scanning seven distinct pages or stopping after only one confirmed page. All fixture requests were intercepted; no production search/proxy/profile/solver was used.
+- JavaScript syntax checks and affected tracked-file whitespace checks passed. No production bot launch/restart, config edits, commit or push. User will start the bot manually; live Yandex behavior after this fix remains to be verified.
+
+## Pagination inspection — 2026-10-22
+
+- User reports Chrome repeatedly showing the first results page and requested inspection. Confirmed source: runSearchAndVisit builds page=2 through page=7 directly from the current URL, ignores navigation rejections, and never verifies the loaded results page number or whether results changed. After CAPTCHA it only checks for the presence of any numeric page parameter, not the expected value.
+- Isolated VM execution of the actual runSearchAndVisit function reproduced seven scans of exactly the same URL after all pagination navigations reject. A second scenario where CAPTCHA redirects to page=1 reproduced six further scans with page=1 despite counters advancing to seven. No live search, production browser/profile, proxy, credentials or solver was used.
+- The expected browser pagination parameter p (zero-based) versus the implemented page parameter is a likely additional compatibility defect; the current live Yandex DOM/requests were not inspected. The exact cause in the user's running Chrome remains unverified. This is inspection only: no application/config changes, bot launch/restart, commit or push.
+
+## User-requested bot stop — 2026-10-22
+
+- User requested stopping the bot and will restart it manually. Sent SIGTERM to the running yandex_search_visit.js Node process (PID 7957); verified zero matching bot processes and no remaining captured descendant/browser processes. No restart, application/config edits, commit or push.
+
+## Authorized profile cache cleanup — 2026-10-22
+
+- User requested inspection and cleanup of profile caches. Initial bot-haibo/.profiles allocation was 5,500,560 KiB (5.25 GiB); Data volume reported 3.5 GiB available at 99% capacity.
+- Process inspection confirmed one running bot and no browser using these profiles. Cleanup repeatedly checked browser user-data-dir paths and live SingletonLock PIDs before each profile; no active/locked profiles were encountered. No process was stopped or restarted.
+- Removed 963 recognized Chromium HTTP/code/GPU/Dawn/Service Worker cache directories strictly under bot-haibo/.profiles, totaling 4,865,650,688 allocated file bytes (4.53 GiB), across 263 discovered profiles. Cookies, history, warm-up markers, Local Storage, IndexedDB and other non-cache files were preserved: inode/size/mtime snapshots of 48,721 files showed zero changes.
+- Final profiles allocation: 748,948 KiB (731 MiB); Data volume reported 8.0 GiB available at 96% capacity. Cache can regrow; no automatic retention or cache-size limit was added. No application/config edits, commit or push.
+
+## Authorized profile cache cleanup — 2026-10-20
+
+- User explicitly requested cleanup. Process inspection outside the sandbox confirmed a running bot and one active browser profile; excluded that entire profile from cleanup and left the bot running.
+- Removed 666 recognized Chromium cache directories from inactive profiles strictly under bot-haibo/.profiles, totaling 4.951 GiB allocated cache files. Preserved cookies, history, warm-up markers, Local Storage and IndexedDB; before/after inode/size/mtime comparison of 3,372 entries in inactive profiles was unchanged.
+- Final profiles allocation: 579,732 KiB (approximately 566 MiB). Data volume reported 5.1 GiB available at 98% capacity. Active-profile cache remains; no retention limit, source/config change, restart, commit or push.
+
+## Profile cache recurrence inspection — 2026-10-20
+
+- User asked whether profile caches had filled again. Read-only measurements confirmed bot-haibo/.profiles at 5,777,096 KiB (5.51 GiB), with 4.959 GiB allocated to recognized Chromium cache directories (HTTP Cache 4.209 GiB, Code Cache 0.456 GiB, remaining GPU/Dawn/Service Worker caches approximately 0.294 GiB).
+- df reported only 49 MiB available and 100% capacity on the Data volume. This confirms cache regrowth since the October 19 cleanup; it does not establish that caches account for all disk usage.
+- Process inspection was denied by the sandbox, so bot/browser running status was not verified. No cache deletion, profile reset, source/config change, bot restart, commit or push was performed.
+
+## Android Studio removal — 2026-10-19
+
+- User explicitly requested uninstalling Android Studio and asked whether its projects can be opened in VS Code. Removed /Applications/Android Studio.app and its AndroidStudio2024.3 directories under ~/Library/Caches/Google and ~/Library/Logs/Google, after checking no process was running from the app bundle. Measured pre-removal allocation of these three directories totaled approximately 4.80 GiB. df afterward reported 10 GiB available (95% capacity).
+- Preserved all project source directories, ~/Library/Android/sdk, ~/.android emulator data, ~/.gradle, and Android Studio Application Support settings/local history. Initial commentary mentioned removing settings, but these were retained to preserve local history. No other application was removed or stopped.
+- App bundle included Contents/jbr, so bundled Java was removed with the application; availability of an independent JDK and VS Code Android build/debug setup was not verified. Source files remain editable in VS Code; building Android projects may require independent JDK configuration.
+
+## Android Studio disk and memory inspection — 2026-10-19
+
+- User asked whether unused Android Studio can be removed and whether RAM is the problem. Read-only measurements: Android Studio app 2.72 GiB; ~/Library/Android/sdk 25.78 GiB; ~/.android 14.64 GiB (mostly avd emulator data); ~/.gradle 5.08 GiB; AndroidStudio2024.3 support/cache/log directories together 2.33 GiB. Total allocated size approximately 50.54 GiB; Gradle may also serve unrelated Java/Kotlin projects. APFS actual space recovered by deletion is not yet measured.
+- Mac has 8 GiB physical RAM; snapshot showed approximately 3.40 GiB occupied by the memory compressor and 3.66 GiB swap used. Top resident processes included VS Code and its extensions. No Android Studio/Android emulator process was identified; the broad process-name filter also matched Visual Studio Code, which is a distinct application. These are point-in-time observations, not proof of sustained memory pressure or exact per-app total memory.
+- Disk still reported 5.4 GiB available at 98% capacity. No Android applications, SDKs, emulator data, Gradle files or processes were deleted/stopped; user asked for assessment only.
+
+## Browser cache cleanup preserving profiles — 2026-10-19
+
+- User suspected profiles/cache had filled the disk. Read-only checks confirmed Data volume at 100% with 35 MiB available; bot-haibo/.profiles occupied 6,969,188 KiB (6.65 GiB), including 6.291 GiB of disposable Chromium caches across 106 browser profiles/probes.
+- Process inspection found no running yandex_search_visit.js bot or browser with a bot-haibo/.profiles user-data-dir; personal Chrome was left untouched. Removed 754 recognized cache directories strictly under bot-haibo/.profiles (HTTP/code/GPU/Dawn caches and Service Worker CacheStorage), preserving the profile directories.
+- Before/after metadata comparison confirmed all 579 discovered Cookies, History, .warmed, warm-history.json, Local Storage and IndexedDB entries unchanged. Profiles afterward occupied 372,132 KiB (363 MiB); df reported 5.4 GiB available at 98% capacity. Filesystem-wide availability differs from the measured removed cache allocation; no other cleanup was performed.
+- No bot start/restart, source/config edits, live proxy requests, commit or push. Cache can grow again as new IP-specific profiles are created; no automatic retention or cache-size limit was added.
+
+## Zero-success warm-up startup retry — 2026-10-18
+
+- Latest user excerpt: initial and profile-startup IP checks both succeeded with the same IP. Warm-up then failed on all four sites: Wikipedia and ya.ru tunnel errors, Maps CAPTCHA, and Weather an unspecified HTTP error. No query ran in this excerpt.
+- The new profile's 0/4 warm-up triggered the existing startup guard and a 300s retry of proxy session 1 (queries 1–4). `exit IP is dirty` is the bot's CAPTCHA diagnostic wording, not independently verified IP reputation. No runtime changes or live checks.
+
+## Between-query profile check tunnel failures — 2026-10-18
+
+- New user excerpt: first between-query IP check failed once, then returned a changed IP. Bot selected that IP's new profile; all three checks from the newly launched browser failed with ERR_TUNNEL_CONNECTION_FAILED against api.ipify.org. No warm-up opening or new search is shown after the switch.
+- Source confirms the second IP check verifies the newly launched browser still uses the selected profile's IP before warm-up. Failure closes the browser and waits 300s before retrying the same query. `Nav attempt 1/1` is the inner single-navigation attempt; `Proxy attempt 1/3` is the outer three-attempt check, not contradictory limits. Provider-side cause remains unverified; no runtime changes or live checks.
+
+## Horgos tunnel and failed arrival diagnosis — 2026-10-18
+
+- User-supplied run: warm-up succeeded on 1/4 sites, two sites returned unspecified HTTP errors and Maps showed CAPTCHA. Query 1 cleared CAPTCHA and found the Audi A3 target link; one click popup was observed but no loaded target document was confirmed within 15s. Direct fallback ended at chrome-error://chromewebdata/ with FAIL / target-not-reached. The excerpt does not show the underlying error for that target navigation.
+- Query 2 failed all three ya.ru navigation attempts with net::ERR_TUNNEL_CONNECTION_FAILED. This confirms proxy-tunnel failures for those requests; remaining bandwidth, provider outage, rotation, and destination-specific restrictions were not checked. Successful IP checks do not establish connectivity to other destinations.
+- Source recheck confirms failed loaded-document validation rejects Chromium error pages; click-popups: 1 means a popup was observed, not that its document loaded. No runtime/config changes or live network checks for this diagnosis.
+
+## Search popup ownership and duplicate-tab repair — 2026-10-17
+
+- User reports duplicate Horgos tabs on every run: working tab scrolls while another stays idle. Screenshots show differing mobile/desktop layouts. Confirmed source defects: search-click timeout returned the source page without closing click popups; selected search popups were never passed through humanizePage. Exact production cause of the 15s arrival timeout remains unverified.
+- followSearchLink now records source-owned targets at targetcreated, keeps a confirmed popup in the foreground, closes other owned popups, and closes pending popups before returning a timeout for direct fallback. Its scoped guard remains active through fallback navigation, then is released before internal browsing; final cleanup closes the selected search popup. Existing unrelated tabs are excluded. Caller cleanup also runs if popup configuration throws.
+- findAndVisitTarget applies the existing configured device setup to a selected search popup before screenshots/reading. Timeout diagnostics now include the observed click-popup count. Source-page fallback and SEARCH/DIRECT attribution remain explicit.
+- All 67 tests passed via node --test --test-timeout=60000 bot-haibo/test/*.test.js with Chromium outside the sandbox. Added local HTTP regressions reproduce a loading popup exceeding the click budget and verify it is closed before direct browsing, preserve an existing target tab, keep subsequent internal popups usable, configure/foreground a successful noopener search popup, close it afterward, and release listeners. Syntax and affected tracked-file whitespace checks passed. No live production browser/profiles/proxies/solver, restart, commit or push. Restart Node to apply; production behavior not yet verified.
+
+## Duplicate target tabs observation — 2026-10-17
+
+- User's new query-1 log records search-click timeout at 15s followed by successful direct navigation to /search?brand=Audi&model=A3. Screenshot shows an about:blank tab and two Horgos tabs; active URL is the homepage with ysclid. Their exact creation sequence is not proven by the screenshot.
+- Source confirms followSearchLink returns the source page on timeout without closing newly opened search popups; the caller then directly navigates that source page. A late/unrecognized search popup plus this fallback can therefore leave two target tabs. This is a supported explanation, not a verified runtime sequence or timeout cause. No runtime changes for this explanation.
+
+## Internal popup browsing repair — 2026-10-17
+
+- Confirmed code defect: openInternalLink observed only the source tab, so target=_blank internal links could not be confirmed. The exact production ProtocolError from the supplied log remains unknown; a background-tab/input connection is a hypothesis.
+- Internal interactions now bring their page to the foreground. openInternalLink observes newly created page targets with the source as opener (including Chromium noopener links), requires the exact normalized requested URL and a loaded successful document, and returns the reached page. Existing unrelated tabs cannot satisfy a click. All enumerated link handles are disposed; unconfirmed popups are closed.
+- visitSite reads/screenshots a confirmed internal popup, counts it, then closes it and restores the original tab in finally. Internal errors now log the redacted message as well as error.name.
+- All 65 tests passed with node --test --test-timeout=60000 bot-haibo/test/*.test.js outside the sandbox for Chromium. New local HTTP regression covers mobile/desktop noopener popups, subsequent source-tab taps, actual visit counters and popup cleanup, rejection of a wrong popup despite an existing matching tab, and injected ProtocolError diagnostic redaction. Syntax checks and affected tracked-file whitespace check passed. No production profiles, proxies, paid solver, running bot restart, commit or push; restart Node to load the fix. Production recurrence remains unverified.
+
+## Horgos successful search and internal errors — 2026-10-17
+
+- New user-supplied query-2 excerpt confirms checkbox clearance, a search/new-tab arrival at product/3008 with ysclid, working scroll (0 -> 1286), and one confirmed internal visit to kupit-avto-v-horgose with further scroll (0 -> 1515).
+- Privacy-policy click returned no-confirmed-navigation: openInternalLink's 8s observation ended with the original normalized page URL. This does not establish why navigation was absent or whether another tab opened. Subsequent cookie-policy and homepage attempts logged ProtocolError; the internal-browsing catch still prints only error.name, so the failed command and underlying cause are unknown. Last agreement-link line records an attempt only. No runtime code changes or live actions for this diagnosis.
+
+## Warm-up traffic reduction — 2026-10-17
+
+- User requested excluding video/reels sites from warm-up because proxy traffic is limited (user reports 3 GB remaining). Screenshot shows 36.5 GB bandwidth statistics and a 37.5 GB plan with a nearly full bar; interpreting this as about 1 GB remaining is an inference, not a verified account balance. The exact reels site was not identified.
+- Removed Kinopoisk and yandex.ru/news from WARM_NEUTRAL_SITES. Added warmup-traffic.js, installed before warm-up navigation only: blocks media resource requests, common audio/video/streaming file extensions (including fetch-based mp4 and m3u8), and Dzen/Kinopoisk hostnames/subdomains. Warm-up link selection also skips those domains and video/reels/shorts paths. Search and target browsing tabs do not install this filter.
+- All 9 relevant tests passed via node --test --test-timeout=15000 bot-haibo/test/warmup-traffic.test.js bot-haibo/test/warmup-guard.test.js. Real Chromium/local-server test confirms blocked media requests never reach the server, ordinary CSS/image/script fetches still pass, and another unfiltered tab can download the same URL. Provider byte savings and live-site compatibility were not measured. No bot restart or live proxy traffic; restart Node to apply.
+
+## Search interaction and touch recovery — 2026-10-17
+
+- User authorized fixing the unconfirmed horgos search click and swipe failures. Exact production CDP error remains unknown: previous logs discarded its message. Baseline 20 interaction tests passed outside the sandbox; isolated puppeteer-extra/stealth diagnostics did not reproduce failure after full-page screenshots or in a default desktop tab. A local real rel=noopener popup was detected correctly; no opener-policy change was made.
+- findAndVisitTarget now skips hidden/zero-size links. followSearchLink scrolls instantly, waits up to 2s for stable geometry and an unobstructed centre, then sends native input there. Covered/moving links are explicitly rejected. Input errors and arrival timeouts have diagnostic details, redacted by the CLI before logging. Actual loaded-document arrival remains required; direct fallback is still labelled DIRECT.
+- touchSwipe now records the failed stage and redacted protocol message, returns a success flag, and attempts one recovery for ProtocolError using an independent CDP session: cancel stale touch, enable touch, native touchStart/move/end with an empty ending touch list. Chromium's specific no-active-touch cancellation rejection is tolerated. Session cleanup is bounded by existing CDP/browser mechanics; no browser launch signatures/options changed. Reading stops its swipe loop if recovery fails.
+- Validation: all 62 tests passed via node --test --test-timeout=60000 bot-haibo/test/*.test.js using isolated local fixtures. Added real-browser regressions for temporary/permanent overlays, hidden search-result duplicates, injected mid-swipe ProtocolError followed by actual touch scrolling and a working subsequent gesture, plus unrecoverable-input loop stopping and credential-URL redaction. Syntax checks and whitespace checks for affected code passed. Repository-wide diff --check still reports pre-existing whitespace in the user's projects.json; left untouched.
+- No live search, production profile, paid solver or running bot was used or restarted for this fix. Restart Node to load the changes; production recurrence and the original root cause remain unverified. No commit/push.
+
+## Horgos query-2 diagnosis — 2026-10-17
+
+- User's VW T-Cross query-2 excerpt shows CAPTCHA cleared after checkbox, a matching horgos-auto.com search link, unconfirmed search click and successful direct fallback, followed by four swipe ProtocolErrors. Reported scroll state stayed 0 -> 0 with range 22885; the final internal-link log records an attempt, not a confirmed transition.
+- Rechecked current source: followSearchLink observes eligible source/new-popup target documents for 15s and returns click-target-not-reached when none passes arrival validation; exact failure cause remains unknown. touchSwipe uses numeric touchStart and handle move/end but logs only error.name, hiding the underlying CDP error message. No runtime changes or live bot/browser actions for this diagnosis.
+
+## Browser profile cleanup — 2026-10-17
+
+- User explicitly requested profile cleanup to free disk space. Process inspection found no Chromium/Chrome process and one running yandex_search_visit Node process (PID 9037); sent that bot SIGINT before cleanup to prevent profile recreation. Bot was not restarted.
+- Removed all 13 directory entries inside bot-haibo/.profiles, including legacy project profiles, by-ip storage and .proxy-check. Before deletion their allocated size was 8.88 GiB; afterward .profiles measured 0 B and df reported 10 GiB available (95% capacity).
+- Cookies and warm-up history in these profiles were removed; future runs recreate profiles and require fresh warm-up. No configuration, credentials or runtime source files changed.
+
+## Gir-master startup diagnosis — 2026-10-17
+
+- User's session-2 excerpt reports warm-up 2/4, ENOSPC writing warm-history.json, then a misleading zero-success warm-up error, ENOSPC creating another IP profile, and a profile-already-running launch error. No searches are shown during these startup retries.
+- Confirmed source: warmUpProfile silently catches .warmed write failures; openIpProfileSession checks that marker rather than the returned visited count. Thus successful visits without a saved marker can be reported as no successful visits. The ENOSPC excerpt supports this explanation, but the marker-write exception itself was suppressed.
+- Read-only checks at diagnosis: Data volume reports 100% capacity with about 1.6 GiB available; bot-haibo/.profiles totals 8.9 GiB. Available space during the earlier failures is unknown. No profile data deleted or processes stopped.
+- IP changes trigger separate project/device/IP profiles and renewed warm-up; the same session retries every 300s. previousIp updates only after startup succeeds, explaining repeated comparison to the last accepted IP. Profile lock cause (active browser versus stale lock) remains unconfirmed; no runtime code changed.
+
+## Disk-full proxy startup diagnosis — 2026-10-16
+
+- User's horgos-auto session-2 log reports `ENOSPC` writing the proxy-check Chromium profile Preferences, followed by repeated profile-already-running launch errors. A surviving Chromium process versus a stale profile lock was not inspected; the causal connection is unconfirmed.
+- Read-only `df -h .` check showed the Data volume at 100% capacity with approximately 817 MiB available at diagnosis time. This supports severe disk pressure; free space at the earlier failure time is unknown.
+- Source confirms an unchanged proxy IP triggers rotation checks, and session startup errors retry the same batch every 300 seconds by default. The excerpt shows queries 5–8 awaiting session startup, not executing. No processes stopped, profiles deleted or runtime code changed.
+
+## Imperator query additions — 2026-10-16
+
+- Confirmed `imperator-kzn` search queries are configured in `bot-haibo/projects.json`, in `imperator-kzn.queries`; `bot-gir-master/proxies.js` does not control this list.
+- Added the exact requested queries `роллы казань император` and `доставка роллы император казань`, preserving the existing eight entries (ten total). JSON and exact additions validated locally; no live bot run.
+- `bot-haibo/yandex_search_visit.js` reads this registry at startup; positional CLI query arguments override the configured list for that run.
+
+## Last interaction fix rolled back — 2026-10-15
+
+- User reported Chromium no longer launches after the last interaction/touch fix and explicitly requested the preceding version. The exact launch failure was not inspected; restoration was prioritized.
+- Reverted only that fix: restored original search-click helper/tests, swipe implementation, internal interaction helper/tests, search-link enumeration, duplicate homepage log and browser launch signature/options/call sites. Removed the newly introduced page-interaction module and touch-recovery tests.
+- Preserved all changes that predated that fix, including CAPTCHA state checks, warm-up guards, internal navigation and existing IP-profile changes. Credentials/configuration, browser profiles and installed dependencies were not modified. No commit or push.
+- Verification: restored tracked visit-result helper/tests exactly match HEAD (they had no pre-fix changes); working-tree file status and source diff totals match the pre-fix state. All five restored JavaScript files pass syntax checks and `git diff --check` passes. Actual Chromium launch was not re-tested during rollback.
+
+## Horgos query-1 log diagnosis — 2026-10-15
+
+- User's horgos-auto excerpt confirms successful query submission, CAPTCHA clearance without solver, a matching Audi A3 SERP link, an unconfirmed click followed by successful explicit direct navigation, and three swipe ProtocolErrors. It does not establish a confirmed search arrival.
+- Current `followSearchLink()` reports `click-target-not-reached` after no eligible loaded target document is observed within its 15s polling window following the click. This reason means the interaction did not throw; the exact reason for the missing arrival remains unknown.
+- Current swipe implementation already uses numeric `touchStart(x, y)` and returned handle `move()`/`end()`. Its catch still records only error.name, so the supplied ProtocolError lines cannot identify the failed CDP command or underlying cause; attributing them to the proxy, CAPTCHA or the old touch API bug would be unconfirmed.
+- Warm-up continued after one successful site; failed optional sites did not prevent searching. Duplicate homepage-opening messages are duplicate logs in the source, not proof of two navigations. No runtime changes or live bot execution for this diagnosis.
+
+## Search click and ProtocolError log diagnosis — 2026-10-15
+
+- User's imperator query-4 excerpt confirms form submission and a matching SERP href, followed by `click-target-not-reached`, successful direct arrival, a swipe ProtocolError, zero detected scroll range and repeated internal-browsing ProtocolErrors. It does not contain the underlying protocol error messages.
+- Confirmed source: `followSearchLink()` allows 15s for a loaded target document in the source tab or a newly created popup with that source as opener. `click-target-not-reached` means tap/click did not throw, but no eligible successful arrival was observed; it does not identify the reason or rule out a late/unobserved arrival.
+- `touchSwipe()` and the internal browsing catch log only error.name, discarding the diagnostic message. Exact protocol command/failure cannot be determined from the supplied excerpt. A shared cause between search-click failure and subsequent browsing failures is unconfirmed. No runtime changes made for this diagnosis.
+
+
+## Proxy tunnel log diagnosis — 2026-10-15
+
+- User's query-3 excerpt shows one failed ipify navigation followed by a successful IP check, profile reselection after warm-up, another successful IP check, and then three `ERR_TUNNEL_CONNECTION_FAILED` failures opening ya.ru. Successful IP checks establish connectivity only for those requests; the excerpt does not establish the provider-side cause of later tunnel failures.
+- Confirmed in source: `openIpProfileSession()` selects another profile only when the checked IP differs from that profile's IP. The previous IP is absent from this excerpt, so repeated display of the new IP does not prove an incorrect switch.
+- Confirmed duplicate `Opening ya.ru` log statements in `runSearchAndVisit()` (before tab creation and before navigation); they do not represent two homepage navigations. Exhausted initial navigation retries propagate to the query loop and become `network-error`; the current query is recorded as failed rather than retried through session recovery. No runtime code changed during this diagnosis.
+
+
+## CAPTCHA navigation recheck — 2026-10-15
+
+- User-supplied query-6 log shows checkbox success, then a second-page checkbox `Execution context was destroyed` error. At Python invocation time the URL was already `/search/touch`, with no local `pdata/formAction`; nevertheless a paid task was created. The fragment does not show the final task outcome. It supports a navigation/state race, not a confirmed inability to solve the original challenge.
+- Added `bot-haibo/captcha-state.js`: classify the loaded document using its own URL, readiness, visible challenge controls and search input/results. Navigation-context destruction is retried briefly. Unknown/loading/error pages are not treated as solved and do not authorize a solver start.
+- `solveCaptcha()` rechecks before and after checkbox, after DOM inspection/navigation and after the local attempt. A cleared challenge resumes search immediately. `tryClickCaptchaCheckbox()` rechecks after an interrupted navigation rather than unconditionally reporting failure.
+- Python wrapper checks before entry/preflight and every task/retry. A dedicated already-cleared result prevents token application or failure fallback on a search page. A changed CAPTCHA URL prevents using the stale captured URL for a new task. Challenge-solving algorithms, task types and paid-task polling were not changed.
+- All 57 tests passed via `node --test --test-timeout=60000 bot-haibo/test/*.test.js`, including 11 new state/flow tests for checkbox redirect, destroyed context, DOM-inspection navigation, ordinary search pages, unknown states, genuine visible challenges, redirect after a local attempt, redirect during free preflight and prevention of another task after results appear during a failed mocked attempt. Browser requests were intercepted locally and solver processes were mocked; no live search or paid task ran. Syntax and whitespace checks passed.
+- Existing local warm-up/internal-browsing fixes were preserved. No commit/push made for this fix; restart Node to load it.
+
+## Imperator internal browsing repair — 2026-10-15
+
+- Live public-site inspection confirmed blocking FoodSoul prompts on imperator-kzn.ru: desktop `.ui-modal` delivery-method chooser; Android mobile `.delivery-choice` plus a higher cookie-notice bottom sheet. Links beneath these overlays were not interactable. After selecting the public menu/pickup mode, desktop `Акции` opened `/kazan/offers` with its corresponding title. No address, cart, feedback form or order was submitted.
+- Confirmed mobile swipe defect against installed Puppeteer declarations/implementation: `touchStart` requires numeric x/y and returns a TouchHandle with `move()`/`end()`. The old object argument and nonexistent screen-level move/end were swallowed by an empty catch. Fixed those calls and cleanup; removed a recursive maxTouchPoints getter so the native value remains readable. Swipe coordinates now follow the viewport dimensions.
+- Confirmed mobile page scrolling occurs in `MAIN.page-content`, while window.scrollY remains 0. Added ancestor-based scroll-state detection and bounded desktop wheel scrolling. Reading logs now report the active scroll container's position/range rather than implying no movement from window.scrollY alone.
+- Added `bot-haibo/site-navigation.js`: handles only the identified imperator cookie notice and delivery chooser using normal visible buttons; uses menu/pickup mode without entering an address or placing an order. It ignores unrelated dialogs, filters hidden/duplicate/tracking self links and cart/account routes, waits for stable layout, hit-tests the link before interaction, and verifies the requested same-domain route/document after a click. Wrong routes or unchanged URLs are not counted.
+- Reworked `visitSite()` to retain reading pauses and browsing of 2–4 other pages while counting confirmed pages separately from link attempts and explicit discovery fallback opens. `Confirmed internal page` and `Confirmed internal pages: ... | link clicks: ... | direct opens: ...` replace the former unconditional clicked count. Direct discovery fallback remains separate from real link clicks.
+- Live isolated Android Chromium check of the actual helper and swipe code succeeded: pickup mode selected, internal MAIN scrollTop increased to about 1460px with window.scrollY 0, and the chosen `/kazan/supy` route opened with the `Том-ям и Вок` title. A preliminary run showed a different category after a moving-layout tap; the final fix waits for stable geometry and requires the requested route, and was retested live successfully. Separate Playwright mobile tap also confirmed `/kazan/supy`.
+- Final validation: all 46 tests passed with `node --test --test-timeout=60000 bot-haibo/test/*.test.js`. New cases cover desktop/mobile prompt variants, cookie-sheet ordering, hidden duplicates, blocked/prevented clicks, wrong-route rejection, actual visit counters, native touch support, touch events, document scrolling and internal-container scrolling. Syntax and whitespace checks passed.
+- Live diagnostics used temporary isolated browser contexts and direct public site visits, not production profiles, proxy/search traffic or paid solvers. Generated diagnostic artifacts were removed. Existing uncommitted warm-up fixes were preserved; no commits/pushes were made for this task. Restart the bot to use this code. Browser interactions do not guarantee human classification or ranking effects.
+
+## Bounded warm-up recovery — 2026-10-15
+
+- User reported no progress after `[warm 1/4] skipped ... net::ERR_TIMED_OUT`. Confirmed source weakness: immediately after that message the old code awaited unbounded `page.close()`, and page creation/setup plus scroll/activity had no overall site deadline. The exact blocked operation in the user's running process was not inspected.
+- Added `bot-haibo/warmup-guard.js` and connected `warmVisitPage()`: 60s total site budget (`HAIBO_WARM_SITE_MAX_MS`, 1000–300000ms), including creation/setup/activity/scroll/back; optional warm-up navigation gets one attempt of at most 20s, rather than three retries on the same site. Each site logs its opening and timeout stage.
+- Cleanup is bounded separately: normal close (3s), then CDP target close; if tab cleanup fails, terminate/recover that owned browser instance and let the existing same-session startup retry policy run. Profile-startup cleanup/probe close now use a bounded browser close with an owned-child-process kill fallback. No other Chromium processes are targeted.
+- All warm-up awaits run through cancellable steps so late completion cannot resume actions after the visit deadline. Page setup failures are now within cleanup coverage; a late-created page is cleaned up. Failed sites do not count as successful warm-up visits.
+- All 35 tests passed via `node --test --test-timeout=60000 bot-haibo/test/*.test.js`, including a real Chromium regression with a locally intercepted stalled navigation plus deliberately hanging `page.close()`, followed by successful processing of the next site. Additional tests cover stalled setup/scroll, late completions, failed CDP close, owned process cleanup and the actual multi-site warm-up loop. Syntax and whitespace checks passed.
+- Changes remain local for this fix; no commit/push, live proxy search, paid solver call or interaction with the user's currently running browser was performed. Restarting the old Node process is required to load this fix.
+
 ## IP profile publication and live results — 2026-10-15
 
 - User explicitly requested committing and pushing the current IP-profile implementation to `origin/main`; the prior rollback checkpoint remains `4e8550f`.
@@ -96,7 +415,7 @@ Three bot projects analyzed: **bot-gir-master**, **bot-system**, **bot-haibo**.
 - `services/fingerprint/` — Fingerprint subdirectory (EXAMINED: generator.js, applyFingerprint.js, devices.js, behavior.js all simple modules)
 - `workers/worker.js` — BullMQ worker with Puppeteer StealthPlugin (EXAMINED: 96 lines)
 - Screenshot images: multiple `.png` files from `horgos-auto.com` tests
-- `projects.json` contains a confirmed `tatspise` project entry for `tatspise.ru`, but there is no `tatspise.sh` launcher in `bot-haibo`; launch it directly with `node yandex_search_visit.js --project tatspise` or create a matching shell wrapper.
+- `projects.json` contains a confirmed `tatspise` project entry for `tatspise.ru`, but there is no `tatspise.sh` launcher in `bot-haibo`; launch it directly with `node yandex_search_visit.js --project tatspise` or create a matching shell wrapper. Rechecked 2026-10-23: the registry has 54 queries; CLI accepts `--project tatspise`. From the repository root use `node bot-haibo/yandex_search_visit.js --project tatspise`. Bot was not started for this check.
 
 ---
 
